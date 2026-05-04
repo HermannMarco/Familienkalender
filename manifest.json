@@ -1,0 +1,26 @@
+{
+  "name": "Familienkalender",
+  "short_name": "Kalender",
+  "description": "Gemeinsamer Familienkalender mit Terminen, Todos und Geburtstagen",
+  "start_url": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#4361ee",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"],
+  "lang": "de"
+}

@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#4361ee">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Familienkalender">
+  <title>Familienkalender</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icons/icon.svg">
+  <link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- ══════════════════════════════════════════
+     LOADING SCREEN
+══════════════════════════════════════════ -->
+<div id="screen-loading">
+  <div class="loading-icon">
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="16" y="26" width="68" height="58" rx="8" stroke="white" stroke-width="5"/>
+      <line x1="16" y1="46" x2="84" y2="46" stroke="white" stroke-width="5"/>
+      <line x1="35" y1="16" x2="35" y2="36" stroke="white" stroke-width="5" stroke-linecap="round"/>
+      <line x1="65" y1="16" x2="65" y2="36" stroke="white" stroke-width="5" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <p>Familienkalender</p>
+  <div class="loading-spinner"></div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     SETUP SCREEN
+══════════════════════════════════════════ -->
+<div id="screen-setup" class="hidden">
+  <div class="setup-container">
+    <div class="setup-logo">
+      <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="16" y="26" width="68" height="58" rx="8" stroke="#4361ee" stroke-width="5"/>
+        <line x1="16" y1="46" x2="84" y2="46" stroke="#4361ee" stroke-width="5"/>
+        <line x1="35" y1="16" x2="35" y2="36" stroke="#4361ee" stroke-width="5" stroke-linecap="round"/>
+        <line x1="65" y1="16" x2="65" y2="36" stroke="#4361ee" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1>Familienkalender</h1>
+    <p class="setup-subtitle">Gemeinsam organisiert bleiben.</p>
+
+    <div id="setup-choice">
+      <button class="btn-primary btn-full" onclick="App.showSetupCreate()">
+        Neuen Kalender erstellen
+      </button>
+      <button class="btn-secondary btn-full" onclick="App.showSetupJoin()">
+        Bestehendem Kalender beitreten
+      </button>
+    </div>
+
+    <div id="setup-create-form" class="hidden">
+      <h2>Neuer Kalender</h2>
+      <div class="form-group">
+        <label class="form-label">Name der Familie</label>
+        <input type="text" id="input-family-name" class="form-input" placeholder="z.B. Familie Müller" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Dein Name</label>
+        <input type="text" id="input-first-member-name" class="form-input" placeholder="z.B. Anna" autocomplete="off">
+      </div>
+      <button class="btn-primary btn-full" onclick="App.createFamily()">Erstellen</button>
+      <button class="btn-text btn-full" onclick="App.showSetupChoice()">Zurück</button>
+      <div id="setup-error" class="error-msg hidden"></div>
+    </div>
+
+    <div id="setup-join-form" class="hidden">
+      <h2>Beitreten</h2>
+      <p class="form-hint">Gib den 6-stelligen Code deiner Familie ein:</p>
+      <div class="form-group">
+        <input type="text" id="input-join-code" class="form-input code-input"
+               placeholder="XXXXXX" maxlength="6"
+               autocomplete="off" autocorrect="off" autocapitalize="characters" spellcheck="false">
+      </div>
+      <button class="btn-primary btn-full" onclick="App.joinFamily()">Beitreten</button>
+      <button class="btn-text btn-full" onclick="App.showSetupChoice()">Zurück</button>
+      <div id="join-error" class="error-msg hidden"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     MAIN APP
+══════════════════════════════════════════ -->
+<div id="screen-app" class="hidden">
+
+  <!-- Header -->
+  <header id="app-header">
+    <div class="header-left">
+      <button class="icon-btn" id="btn-prev" onclick="App.navigatePrev()" aria-label="Zurück">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="15 18 9 12 15 6"></polyline>
+        </svg>
+      </button>
+    </div>
+
+    <button class="header-title-btn" onclick="App.goToToday()">
+      <span id="header-title">Mai 2026</span>
+    </button>
+
+    <div class="header-right">
+      <button class="icon-btn" id="btn-next" onclick="App.navigateNext()" aria-label="Weiter">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="9 18 15 12 9 6"></polyline>
+        </svg>
+      </button>
+      <button class="icon-btn btn-add" onclick="App.openAddEvent()" aria-label="Hinzufügen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- View Tabs (Calendar only) -->
+  <div id="view-tabs">
+    <button class="view-tab" data-view="tag" onclick="App.setView('tag')">Tag</button>
+    <button class="view-tab" data-view="woche" onclick="App.setView('woche')">Woche</button>
+    <button class="view-tab active" data-view="monat" onclick="App.setView('monat')">Monat</button>
+  </div>
+
+  <!-- Main Content -->
+  <main id="main-content">
+
+    <!-- ── Kalender Tab ── -->
+    <div id="tab-kalender" class="tab-pane">
+
+      <!-- Month View -->
+      <div id="view-monat" class="cal-view">
+        <div class="month-weekdays">
+          <span>Mo</span><span>Di</span><span>Mi</span><span>Do</span><span>Fr</span>
+          <span class="weekend">Sa</span><span class="weekend">So</span>
+        </div>
+        <div id="month-grid" class="month-grid"></div>
+        <!-- Day detail panel (opens below grid when day tapped) -->
+        <div id="day-detail-panel" class="day-detail-panel hidden">
+          <div class="day-detail-header">
+            <span id="day-detail-label"></span>
+            <button class="icon-btn-sm" onclick="App.closeDayPanel()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div id="day-detail-events" class="day-detail-events"></div>
+        </div>
+      </div>
+
+      <!-- Week View -->
+      <div id="view-woche" class="cal-view hidden">
+        <div id="week-header" class="week-header"></div>
+        <div id="week-allday" class="week-allday"></div>
+        <div class="time-scroll-wrap">
+          <div id="week-grid" class="week-grid"></div>
+        </div>
+      </div>
+
+      <!-- Day View -->
+      <div id="view-tag" class="cal-view hidden">
+        <div id="day-allday" class="day-allday"></div>
+        <div class="time-scroll-wrap">
+          <div id="day-grid" class="day-grid"></div>
+        </div>
+      </div>
+
+    </div><!-- /tab-kalender -->
+
+    <!-- ── Todos Tab ── -->
+    <div id="tab-todos" class="tab-pane hidden">
+      <div class="tab-top-bar">
+        <h2>Todos</h2>
+        <button class="btn-icon-text" onclick="App.openAddEvent('todo')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Todo
+        </button>
+      </div>
+      <div class="filter-bar">
+        <button class="filter-btn active" data-filter="offen" onclick="App.setTodoFilter('offen')">Offen</button>
+        <button class="filter-btn" data-filter="erledigt" onclick="App.setTodoFilter('erledigt')">Erledigt</button>
+        <button class="filter-btn" data-filter="alle" onclick="App.setTodoFilter('alle')">Alle</button>
+      </div>
+      <div id="todo-list" class="item-list"></div>
+    </div>
+
+    <!-- ── Geburtstage Tab ── -->
+    <div id="tab-geburtstage" class="tab-pane hidden">
+      <div class="tab-top-bar">
+        <h2>Geburtstage</h2>
+        <button class="btn-icon-text" onclick="App.openAddEvent('geburtstag')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Geburtstag
+        </button>
+      </div>
+      <div id="birthday-list" class="item-list"></div>
+    </div>
+
+    <!-- ── Einstellungen Tab ── -->
+    <div id="tab-einstellungen" class="tab-pane hidden">
+      <div class="settings-wrap">
+
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <h3>Familienmitglieder</h3>
+            <button class="btn-icon-text" onclick="App.openAddMember()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Hinzufügen
+            </button>
+          </div>
+          <div id="members-list"></div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Geräteverknüpfung</h3>
+          <p class="settings-hint">Teile diesen Code, um weitere Geräte hinzuzufügen:</p>
+          <div class="family-code-card" onclick="App.openPairing()">
+            <div id="family-code-display" class="family-code-big">––––––</div>
+            <div class="family-code-hint">Tippen für mehr Optionen</div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Familie</h3>
+          <div id="family-name-display" class="settings-family-name"></div>
+          <button class="btn-danger-outline" onclick="App.confirmLeave()">
+            Dieses Gerät trennen
+          </button>
+        </section>
+
+      </div>
+    </div>
+
+  </main><!-- /main-content -->
+
+  <!-- Bottom Navigation -->
+  <nav id="bottom-nav">
+    <button class="nav-btn active" data-tab="kalender" onclick="App.setTab('kalender')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+        <line x1="16" y1="2" x2="16" y2="6"></line>
+        <line x1="8" y1="2" x2="8" y2="6"></line>
+        <line x1="3" y1="10" x2="21" y2="10"></line>
+      </svg>
+      <span>Kalender</span>
+    </button>
+    <button class="nav-btn" data-tab="todos" onclick="App.setTab('todos')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="9 11 12 14 22 4"></polyline>
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+      </svg>
+      <span>Todos</span>
+    </button>
+    <button class="nav-btn" data-tab="geburtstage" onclick="App.setTab('geburtstage')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"></path>
+        <path d="M20 21a8 8 0 1 0-16 0"></path>
+      </svg>
+      <span>Geburtstage</span>
+    </button>
+    <button class="nav-btn" data-tab="einstellungen" onclick="App.setTab('einstellungen')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+      <span>Einstellungen</span>
+    </button>
+  </nav>
+
+</div><!-- /screen-app -->
+
+<!-- ══════════════════════════════════════════
+     OVERLAY BACKDROP
+══════════════════════════════════════════ -->
+<div id="overlay-backdrop" class="hidden" onclick="App.closeAllSheets()"></div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: EVENT FORM
+══════════════════════════════════════════ -->
+<div id="sheet-event" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-event')">Abbrechen</button>
+    <h3 id="sheet-event-title">Termin hinzufügen</h3>
+    <button class="btn-primary-text" onclick="App.saveEvent()">Speichern</button>
+  </div>
+  <div class="sheet-body">
+
+    <!-- Type Selector -->
+    <div class="type-selector" id="event-type-group">
+      <button class="type-btn active" data-type="termin" onclick="App.setEventType('termin')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/>
+        </svg>
+        Termin
+      </button>
+      <button class="type-btn" data-type="todo" onclick="App.setEventType('todo')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <polyline points="9 11 12 14 22 4"/>
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+        </svg>
+        Todo
+      </button>
+      <button class="type-btn" data-type="geburtstag" onclick="App.setEventType('geburtstag')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="M12 2a5 5 0 1 0 0 10A5 5 0 0 0 12 2z"/>
+          <path d="M20 21a8 8 0 1 0-16 0"/>
+        </svg>
+        Geburtstag
+      </button>
+    </div>
+
+    <!-- Title -->
+    <div class="form-group">
+      <input type="text" id="event-title" class="form-input form-input-big"
+             placeholder="Titel" autocomplete="off">
+    </div>
+
+    <!-- Birthday person name -->
+    <div class="form-group hidden" id="birthday-person-group">
+      <label class="form-label">Person</label>
+      <input type="text" id="event-birthday-person" class="form-input"
+             placeholder="Name der Person" autocomplete="off">
+    </div>
+
+    <!-- Date & Time -->
+    <div class="form-group">
+      <label class="form-label">Datum</label>
+      <input type="date" id="event-date" class="form-input">
+    </div>
+
+    <div class="form-group" id="time-group">
+      <div class="form-label-row">
+        <label class="form-label" for="event-has-time">Uhrzeit</label>
+        <label class="toggle">
+          <input type="checkbox" id="event-has-time" onchange="App.toggleTime()">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+      <div id="time-inputs" class="time-row hidden">
+        <input type="time" id="event-time" class="form-input">
+        <span class="time-dash">–</span>
+        <input type="time" id="event-end-time" class="form-input">
+      </div>
+    </div>
+
+    <!-- Location -->
+    <div class="form-group" id="location-group">
+      <label class="form-label">Ort (optional)</label>
+      <input type="text" id="event-location" class="form-input"
+             placeholder="Ort eingeben" autocomplete="off">
+    </div>
+
+    <!-- Recurring -->
+    <div class="form-group" id="recurring-group">
+      <label class="form-label">Wiederholen</label>
+      <select id="event-recurring" class="form-select" onchange="App.toggleRecurringOptions()">
+        <option value="none">Nicht wiederholen</option>
+        <option value="daily">Täglich</option>
+        <option value="weekly">Wöchentlich</option>
+        <option value="monthly">Monatlich</option>
+        <option value="yearly">Jährlich</option>
+      </select>
+
+      <div id="recurring-options" class="recurring-opts hidden">
+        <div class="form-row">
+          <span class="form-label">Alle</span>
+          <input type="number" id="recurring-interval" class="form-input form-input-num"
+                 value="1" min="1" max="99">
+          <span id="recurring-unit-label" class="form-label">Wochen</span>
+        </div>
+
+        <div id="recurring-weekdays" class="weekday-picker hidden">
+          <button class="wday-btn" data-day="1">Mo</button>
+          <button class="wday-btn" data-day="2">Di</button>
+          <button class="wday-btn" data-day="3">Mi</button>
+          <button class="wday-btn" data-day="4">Do</button>
+          <button class="wday-btn" data-day="5">Fr</button>
+          <button class="wday-btn" data-day="6">Sa</button>
+          <button class="wday-btn" data-day="0">So</button>
+        </div>
+
+        <div class="form-row">
+          <span class="form-label">Endet</span>
+          <select id="recurring-end-type" class="form-select-sm" onchange="App.toggleRecurringEnd()">
+            <option value="never">Nie</option>
+            <option value="date">Bis Datum</option>
+            <option value="count">Nach Anzahl</option>
+          </select>
+        </div>
+        <div id="recurring-end-date-wrap" class="hidden">
+          <input type="date" id="recurring-end-date" class="form-input">
+        </div>
+        <div id="recurring-end-count-wrap" class="hidden">
+          <div class="form-row">
+            <input type="number" id="recurring-count" class="form-input form-input-num"
+                   value="10" min="1" max="999">
+            <span class="form-label">Wiederholungen</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Members -->
+    <div class="form-group">
+      <label class="form-label">Personen</label>
+      <div id="event-members-selector" class="members-selector">
+        <!-- populated dynamically -->
+      </div>
+    </div>
+
+    <!-- Description -->
+    <div class="form-group">
+      <label class="form-label">Notiz (optional)</label>
+      <textarea id="event-description" class="form-textarea" placeholder="Notiz..."></textarea>
+    </div>
+
+    <div id="event-form-error" class="error-msg hidden"></div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: EVENT DETAIL
+══════════════════════════════════════════ -->
+<div id="sheet-event-detail" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-event-detail')">Schließen</button>
+    <h3 id="detail-sheet-title">Termin</h3>
+    <div class="hdr-actions">
+      <button class="icon-btn-sm" onclick="App.editCurrentEvent()" aria-label="Bearbeiten">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+        </svg>
+      </button>
+      <button class="icon-btn-sm danger" onclick="App.deleteCurrentEvent()" aria-label="Löschen">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="3 6 5 6 21 6"/>
+          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+  <div class="sheet-body" id="event-detail-body">
+    <!-- populated dynamically -->
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: MEMBER FORM
+══════════════════════════════════════════ -->
+<div id="sheet-member" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-member')">Abbrechen</button>
+    <h3 id="sheet-member-title">Mitglied hinzufügen</h3>
+    <button class="btn-primary-text" onclick="App.saveMember()">Speichern</button>
+  </div>
+  <div class="sheet-body">
+    <div class="form-group">
+      <label class="form-label">Name</label>
+      <input type="text" id="member-name" class="form-input form-input-big"
+             placeholder="Vorname" autocomplete="off">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Farbe</label>
+      <div id="member-color-picker" class="color-picker"></div>
+    </div>
+    <div id="member-form-error" class="error-msg hidden"></div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: PAIRING
+══════════════════════════════════════════ -->
+<div id="sheet-pairing" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-pairing')">Schließen</button>
+    <h3>Gerät verbinden</h3>
+    <div></div>
+  </div>
+  <div class="sheet-body">
+    <p class="pairing-desc">Teile diesen Code mit einem anderen Gerät:</p>
+    <div id="pairing-code-big" class="pairing-code"></div>
+    <button class="btn-secondary btn-full" onclick="App.copyFamilyCode()">
+      Code kopieren
+    </button>
+    <div class="pairing-steps">
+      <h4>So funktioniert es:</h4>
+      <ol>
+        <li>Familienkalender auf dem anderen Gerät öffnen</li>
+        <li>„Bestehendem Kalender beitreten" wählen</li>
+        <li>Diesen 6-stelligen Code eingeben</li>
+      </ol>
+    </div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: RECURRING EDIT ACTION
+══════════════════════════════════════════ -->
+<div id="sheet-recurring-action" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-recurring-action')">Abbrechen</button>
+    <h3 id="recurring-action-title">Serientermin</h3>
+    <div></div>
+  </div>
+  <div class="sheet-body">
+    <p id="recurring-action-question" class="pairing-desc">Welche Termine sollen betroffen sein?</p>
+    <div class="recurring-choices">
+      <button class="recurring-choice-btn" onclick="App.applyRecurringAction('one')">
+        <strong>Nur dieser Termin</strong>
+        <span>Nur dieser einzelne Termin</span>
+      </button>
+      <button class="recurring-choice-btn" onclick="App.applyRecurringAction('following')">
+        <strong>Dieser und folgende</strong>
+        <span>Dieser und alle zukünftigen Wiederholungen</span>
+      </button>
+      <button class="recurring-choice-btn" onclick="App.applyRecurringAction('all')">
+        <strong>Alle Termine der Serie</strong>
+        <span>Alle Wiederholungen dieser Terminserie</span>
+      </button>
+    </div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     FIREBASE & APP SCRIPTS
+══════════════════════════════════════════ -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
