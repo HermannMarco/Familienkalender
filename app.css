@@ -995,6 +995,12 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   position: absolute; left: 0; right: 0;
   border-top: 2px solid var(--danger); z-index: 2;
 }
+/* Bug 2.1 fix: now-line spans all 7 day-columns */
+.week-now-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 2px solid var(--danger);
+  z-index: 3; pointer-events: none;
+}
 .wh-cell { text-align: center; padding: 6px 2px; }
 .wh-weekday { font-size: .7rem; color: var(--text-2); text-transform: uppercase; }
 .wh-day {
