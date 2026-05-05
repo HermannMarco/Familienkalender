@@ -340,7 +340,7 @@ function getEventColor(event) {
 function getEventBg(event) {
   if (event.type === 'geburtstag') return BIRTHDAY_COLOR;
   const ids = (event.memberIds || []).filter(id => id !== 'all');
-  if (ids.length === 0) return '#4361ee';
+  if (ids.length === 0) return '#1a1a2e';
   const colors = ids.map(id => { const m = getMember(id); return m ? m.color : '#4361ee'; });
   if (colors.length === 1) return colors[0];
   if (colors.length === 2) return `linear-gradient(135deg, ${colors[0]} 50%, ${colors[1]} 50%)`;
@@ -1501,7 +1501,7 @@ function applyEventTypeUI(type) {
 
   // Pt 10.2: hide endDate for birthdays
   const edg = document.getElementById('end-date-group');
-  if (edg) edg.classList.toggle('hidden', isBirthday || isTodo);
+  if (edg) edg.classList.toggle('hidden', isBirthday);
 
   // Pt 6: show no-year checkbox only for birthdays
   const noYearGroup = document.getElementById('no-year-group');
