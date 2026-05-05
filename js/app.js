@@ -1421,7 +1421,7 @@ function openEditEvent(eventId, dateStr) {
     ev.type === 'geburtstag' ? 'Geburtstag bearbeiten' : 'Termin bearbeiten';
 
   document.getElementById('event-title').value = ev.title || '';
-  document.getElementById('event-date').value = dateStr || ev.date || today();
+  document.getElementById('event-date').value = ev.date || today();
 
   // Bug 15/23 fix: always load endDate from the specific event being edited
   const endDateEl2 = document.getElementById('event-end-date');
@@ -1499,9 +1499,14 @@ function applyEventTypeUI(type) {
   document.getElementById('recurring-group').classList.toggle('hidden', isTodo);
   document.getElementById('event-type-group').classList.toggle('hidden', !!state.editingEventId);
 
-  // Pt 10.2: hide endDate for birthdays
+  // Pt 10.2: hide endDate for birthdays; preserve value across type switches
   const edg = document.getElementById('end-date-group');
-  if (edg) edg.classList.toggle('hidden', isBirthday);
+  if (edg) {
+    const endInp = document.getElementById('event-end-date');
+    const savedEnd = endInp ? endInp.value : '';
+    edg.classList.toggle('hidden', isBirthday);
+    if (endInp && savedEnd) endInp.value = savedEnd;
+  }
 
   // Pt 6: show no-year checkbox only for birthdays
   const noYearGroup = document.getElementById('no-year-group');
