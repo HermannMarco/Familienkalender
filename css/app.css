@@ -969,3 +969,46 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   font-size: .88rem;
   margin-top: 8px;
 }
+
+/* ── Week/Day grid (flex layout) ────────────── */
+.wg-wrap { display: flex; min-width: 0; }
+.wg-times { width: 40px; flex-shrink: 0; }
+.wg-time-label {
+  height: 48px; font-size: .65rem; color: var(--text-2);
+  text-align: right; padding-right: 6px;
+  display: flex; align-items: flex-start; padding-top: 2px;
+}
+.wg-days { display: flex; flex: 1; min-width: 0; }
+.wg-day {
+  flex: 1; position: relative;
+  border-left: 1px solid var(--border);
+  min-width: 0; overflow: hidden;
+}
+.wg-hour {
+  height: 48px; border-top: 1px solid var(--border); position: relative;
+}
+.wg-hour::after {
+  content: ''; position: absolute; top: 50%; left: 0; right: 0;
+  border-top: 1px dashed #eee;
+}
+.wg-now {
+  position: absolute; left: 0; right: 0;
+  border-top: 2px solid var(--danger); z-index: 2;
+}
+/* Bug 2.1 fix: now-line spans all 7 day-columns */
+.week-now-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 2px solid var(--danger);
+  z-index: 3; pointer-events: none;
+}
+.wh-cell { text-align: center; padding: 6px 2px; }
+.wh-weekday { font-size: .7rem; color: var(--text-2); text-transform: uppercase; }
+.wh-day {
+  font-size: 1.1rem; font-weight: 600; margin-top: 2px; cursor: pointer;
+}
+.wh-cell.today .wh-day {
+  background: var(--primary); color: white; border-radius: 50%;
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto;
+}
