@@ -364,7 +364,6 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 
 /* Week view */
 .week-header {
-  display: grid; grid-template-columns: 40px repeat(7, 1fr);
   background: var(--surface);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
@@ -387,7 +386,6 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .week-allday {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
-  display: grid; grid-template-columns: 40px repeat(7, 1fr);
   min-height: 28px;
   flex-shrink: 0;
   padding: 2px;
@@ -399,7 +397,6 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   -webkit-overflow-scrolling: touch;
 }
 .week-grid {
-  display: grid; grid-template-columns: 40px repeat(7, 1fr);
   position: relative;
 }
 .time-label {
@@ -445,7 +442,6 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   min-height: 28px;
 }
 .day-grid {
-  display: grid; grid-template-columns: 40px 1fr;
   position: relative;
 }
 .day-col {
