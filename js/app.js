@@ -533,8 +533,6 @@ async function hashPin(pin, saltB64 = null) {
   const saltBytes = saltB64
     ? Uint8Array.from(atob(saltB64), c => c.charCodeAt(0))
     : crypto.getRandomValues(new Uint8Array(16));
-  console.log('[PIN-DEBUG] hashPin: saltB64 input =', saltB64 ? `"${saltB64}" (len=${saltB64.length})` : 'null (generating new)');
-  console.log('[PIN-DEBUG] hashPin: saltBytes len =', saltBytes.length, 'first 4 bytes =', Array.from(saltBytes.slice(0,4)));
   const key = await crypto.subtle.importKey(
     'raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']
   );
@@ -543,9 +541,16 @@ async function hashPin(pin, saltB64 = null) {
   );
   const hex  = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2,'0')).join('');
   const salt = btoa(String.fromCharCode(...saltBytes));
-  console.log('[PIN-DEBUG] hashPin: re-encoded salt =', `"${salt}"`, 'matches input?', saltB64 === salt);
-  console.log('[PIN-DEBUG] hashPin: hex hash first 16 =', hex.slice(0, 16));
   return `${salt}:${hex}`;
+}
+
+async function legacySha256Hex(pin) {
+  const bits = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+  return Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function isLegacyPinHash(stored) {
+  return typeof stored === 'string' && !stored.includes(':') && /^[0-9a-f]{64}$/i.test(stored);
 }
 
 function checkPinLockout() {
@@ -598,22 +603,20 @@ async function confirmPin() {
   if (!/^\d+$/.test(pin))     { showError('pin-error', 'Nur Ziffern erlaubt'); return; }
 
   const stored = state.family?.pinHash || '';
-  console.log('[PIN-DEBUG] confirmPin: pin len =', pin.length);
-  console.log('[PIN-DEBUG] confirmPin: state.family exists?', !!state.family, 'familyId =', state.family?.id);
-  console.log('[PIN-DEBUG] confirmPin: stored full =', `"${stored}"`, 'len =', stored.length);
-  console.log('[PIN-DEBUG] confirmPin: stored has colon?', stored.includes(':'), 'colon count =', (stored.match(/:/g) || []).length);
-  const [saltB64, hashPart] = stored.split(':');
-  console.log('[PIN-DEBUG] confirmPin: extracted saltB64 =', `"${saltB64}"`, 'hashPart len =', hashPart?.length);
-  const computed  = await hashPin(pin, saltB64);
-  console.log('[PIN-DEBUG] confirmPin: computed full =', `"${computed}"`, 'len =', computed.length);
-  console.log('[PIN-DEBUG] confirmPin: MATCH?', computed === stored);
-  if (computed !== stored) {
-    console.log('[PIN-DEBUG] MISMATCH details:');
-    console.log('  stored salt   =', stored.split(':')[0]);
-    console.log('  computed salt =', computed.split(':')[0]);
-    console.log('  salts equal?  =', stored.split(':')[0] === computed.split(':')[0]);
-    console.log('  stored hash   =', stored.split(':')[1]);
-    console.log('  computed hash =', computed.split(':')[1]);
+  let ok = false;
+  let needsMigration = false;
+
+  if (isLegacyPinHash(stored)) {
+    const legacyComputed = await legacySha256Hex(pin);
+    ok = (legacyComputed === stored);
+    needsMigration = ok;
+  } else {
+    const [saltB64] = stored.split(':');
+    const computed  = await hashPin(pin, saltB64);
+    ok = (computed === stored);
+  }
+
+  if (!ok) {
     const locked = recordPinFailure();
     const remaining = 5 - parseInt(localStorage.getItem('pin_attempts') || '0');
     showError('pin-error', locked
@@ -621,6 +624,15 @@ async function confirmPin() {
       : `Falscher PIN. Noch ${remaining} Versuch${remaining === 1 ? '' : 'e'}.`);
     if (inp) inp.value = '';
     return;
+  }
+
+  if (needsMigration) {
+    try {
+      const newHash = await hashPin(pin);
+      await dbUpdateFamily({ pinHash: newHash });
+    } catch (e) {
+      console.warn('[PIN] Migration auf neues Format fehlgeschlagen:', e.message);
+    }
   }
   clearPinLockout();
   localStorage.setItem('pin_verified_at', String(Date.now()));
@@ -691,9 +703,15 @@ async function savePinManage() {
     if (!currentVal || currentVal.length < 4) {
       showError('pin-manage-error', 'Bitte aktuellen PIN eingeben (mind. 4 Ziffern)'); return;
     }
-    const [saltB64cur] = (state.family.pinHash || '').split(':');
-    const curHash = await hashPin(currentVal, saltB64cur);
-    if (curHash !== state.family.pinHash) {
+    const storedCur = state.family.pinHash || '';
+    let curOk = false;
+    if (isLegacyPinHash(storedCur)) {
+      curOk = (await legacySha256Hex(currentVal)) === storedCur;
+    } else {
+      const [saltB64cur] = storedCur.split(':');
+      curOk = (await hashPin(currentVal, saltB64cur)) === storedCur;
+    }
+    if (!curOk) {
       const locked = recordPinFailure();
       const remaining = 5 - parseInt(localStorage.getItem('pin_attempts') || '0');
       showError('pin-manage-error', locked
