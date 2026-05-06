@@ -66,6 +66,13 @@
         <label class="form-label">Dein Name</label>
         <input type="text" id="input-first-member-name" class="form-input" placeholder="z.B. Anna" autocomplete="off">
       </div>
+      <div class="form-group">
+        <label class="form-label">PIN (optional, 4–6 Ziffern)</label>
+        <input type="password" id="input-setup-pin" class="form-input pin-input-field"
+               placeholder="Leer lassen = kein PIN" maxlength="6"
+               inputmode="numeric" pattern="[0-9]*" autocomplete="new-password">
+        <p class="form-hint" style="margin-top:6px">Schützt den Zugang zum Kalender (1× täglich abgefragt)</p>
+      </div>
       <button class="btn-primary btn-full" onclick="App.createFamily()">Erstellen</button>
       <button class="btn-text btn-full" onclick="App.showSetupChoice()">Zurück</button>
       <div id="setup-error" class="error-msg hidden"></div>
@@ -83,6 +90,32 @@
       <button class="btn-text btn-full" onclick="App.showSetupChoice()">Zurück</button>
       <div id="join-error" class="error-msg hidden"></div>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     PIN SCREEN (Pt 26)
+══════════════════════════════════════════ -->
+<div id="screen-pin" class="hidden">
+  <div class="setup-container">
+    <div class="setup-logo">
+      <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="16" y="26" width="68" height="58" rx="8" stroke="#4361ee" stroke-width="5"/>
+        <line x1="16" y1="46" x2="84" y2="46" stroke="#4361ee" stroke-width="5"/>
+        <line x1="35" y1="16" x2="35" y2="36" stroke="#4361ee" stroke-width="5" stroke-linecap="round"/>
+        <line x1="65" y1="16" x2="65" y2="36" stroke="#4361ee" stroke-width="5" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <h1>Familienkalender</h1>
+    <p id="pin-desc" class="setup-subtitle">Bitte PIN eingeben</p>
+    <div class="form-group">
+      <input type="password" id="pin-input" class="form-input pin-input-big"
+             maxlength="6" inputmode="numeric" pattern="[0-9]*"
+             placeholder="• • • •" autocomplete="off"
+             onkeydown="if(event.key==='Enter')App.confirmPin()">
+    </div>
+    <div id="pin-error" class="error-msg hidden"></div>
+    <button class="btn-primary btn-full" onclick="App.confirmPin()">Bestätigen</button>
   </div>
 </div>
 
@@ -318,6 +351,13 @@
               </div>
             </div>
           </div>
+        </section>
+
+        <!-- Pt 26: PIN-Schutz -->
+        <section class="settings-section">
+          <h3>PIN-Schutz</h3>
+          <p id="pin-settings-status" class="settings-hint"></p>
+          <div id="pin-settings-actions" style="display:flex;flex-direction:column;gap:8px"></div>
         </section>
 
         <section class="settings-section">
@@ -655,6 +695,32 @@
         <span>Alle Wiederholungen dieser Terminserie</span>
       </button>
     </div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: PIN MANAGE (Pt 26)
+══════════════════════════════════════════ -->
+<div id="sheet-pin-manage" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-pin-manage')">Abbrechen</button>
+    <h3 id="pin-manage-title">PIN einrichten</h3>
+    <button class="btn-primary-text" onclick="App.savePinManage()">Speichern</button>
+  </div>
+  <div class="sheet-body">
+    <div class="form-group" id="pin-manage-current-group">
+      <label class="form-label">Aktueller PIN</label>
+      <input type="password" id="pin-manage-current" class="form-input pin-input-field"
+             maxlength="6" inputmode="numeric" placeholder="Aktueller PIN" autocomplete="off">
+    </div>
+    <div class="form-group" id="pin-manage-new-group">
+      <label class="form-label">Neuer PIN (4–6 Ziffern)</label>
+      <input type="password" id="pin-manage-new" class="form-input pin-input-field"
+             maxlength="6" inputmode="numeric" placeholder="Neuer PIN" autocomplete="new-password">
+    </div>
+    <div id="pin-manage-error" class="error-msg hidden"></div>
     <div class="sheet-spacer"></div>
   </div>
 </div>
