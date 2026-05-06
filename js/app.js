@@ -260,14 +260,12 @@ function subscribeEvents(familyId) {
     }, err => console.error('Events listen error', err));
 }
 
-async function dbCreateFamily(name, firstMemberName) {
+async function dbCreateFamily(name, firstMemberName, pinHash = null) {
   const code = genCode();
   const member = { id: genId(), name: firstMemberName, color: MEMBER_COLORS[0] };
-  await db.collection('families').doc(code).set({
-    name,
-    members: [member],
-    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-  });
+  const data = { name, members: [member], createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+  if (pinHash) data.pinHash = pinHash;
+  await db.collection('families').doc(code).set(data);
   return code;
 }
 
@@ -524,6 +522,141 @@ function renderNightModeSettings() {
   if (schedWrap) schedWrap.classList.toggle('hidden', mode !== 'auto');
   if (fromEl) fromEl.value = from;
   if (toEl)   toEl.value   = to;
+}
+
+// ════════════════════════════════════════════════════════════════
+//  Pt 26: PIN PROTECTION
+// ════════════════════════════════════════════════════════════════
+
+async function hashPin(pin) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+}
+
+function isPinExpired() {
+  const ts = localStorage.getItem('pin_verified_at');
+  return !ts || (Date.now() - parseInt(ts)) > 86400000;
+}
+
+let pinCallback = null;
+
+function showPinPrompt(desc, callback) {
+  pinCallback = callback;
+  const descEl = document.getElementById('pin-desc');
+  if (descEl) descEl.textContent = desc || 'Bitte PIN eingeben';
+  const inp = document.getElementById('pin-input');
+  if (inp) inp.value = '';
+  hideError('pin-error');
+  hideEl('screen-loading');
+  hideEl('screen-setup');
+  hideEl('screen-app');
+  showEl('screen-pin');
+  setTimeout(() => inp?.focus(), 150);
+}
+
+async function confirmPin() {
+  const inp = document.getElementById('pin-input');
+  const pin = inp?.value.trim();
+  if (!pin || pin.length < 4) { showError('pin-error', 'Bitte mindestens 4 Ziffern eingeben'); return; }
+  if (!/^\d+$/.test(pin))     { showError('pin-error', 'Nur Ziffern erlaubt'); return; }
+  const hash = await hashPin(pin);
+  if (hash !== state.family?.pinHash) {
+    showError('pin-error', 'Falscher PIN. Bitte erneut versuchen.');
+    if (inp) inp.value = '';
+    return;
+  }
+  localStorage.setItem('pin_verified_at', String(Date.now()));
+  hideEl('screen-pin');
+  const cb = pinCallback; pinCallback = null;
+  if (cb) cb();
+}
+
+function renderPinSettings() {
+  const hasPIN    = !!state.family?.pinHash;
+  const statusEl  = document.getElementById('pin-settings-status');
+  const actionsEl = document.getElementById('pin-settings-actions');
+  if (statusEl) statusEl.textContent = hasPIN
+    ? 'PIN-Schutz ist aktiv. Wird 1× täglich abgefragt.'
+    : 'Kein PIN-Schutz. Kalender ist ohne Abfrage zugänglich.';
+  if (!actionsEl) return;
+  if (hasPIN) {
+    actionsEl.innerHTML =
+      `<button class="btn-secondary btn-full" onclick="App.openChangePIN()">PIN ändern</button>
+       <button class="btn-danger-outline" onclick="App.openRemovePIN()">PIN entfernen</button>`;
+  } else {
+    actionsEl.innerHTML =
+      `<button class="btn-secondary btn-full" onclick="App.openSetPIN()">PIN einrichten</button>`;
+  }
+}
+
+let pinManageMode = null;
+
+function openSetPIN() {
+  pinManageMode = 'set';
+  document.getElementById('pin-manage-title').textContent = 'PIN einrichten';
+  document.getElementById('pin-manage-current-group').classList.add('hidden');
+  document.getElementById('pin-manage-new-group').classList.remove('hidden');
+  document.getElementById('pin-manage-current').value = '';
+  document.getElementById('pin-manage-new').value = '';
+  hideError('pin-manage-error');
+  openSheet('sheet-pin-manage');
+}
+
+function openChangePIN() {
+  pinManageMode = 'change';
+  document.getElementById('pin-manage-title').textContent = 'PIN ändern';
+  document.getElementById('pin-manage-current-group').classList.remove('hidden');
+  document.getElementById('pin-manage-new-group').classList.remove('hidden');
+  document.getElementById('pin-manage-current').value = '';
+  document.getElementById('pin-manage-new').value = '';
+  hideError('pin-manage-error');
+  openSheet('sheet-pin-manage');
+}
+
+function openRemovePIN() {
+  pinManageMode = 'remove';
+  document.getElementById('pin-manage-title').textContent = 'PIN entfernen';
+  document.getElementById('pin-manage-current-group').classList.remove('hidden');
+  document.getElementById('pin-manage-new-group').classList.add('hidden');
+  document.getElementById('pin-manage-current').value = '';
+  hideError('pin-manage-error');
+  openSheet('sheet-pin-manage');
+}
+
+async function savePinManage() {
+  const currentVal = document.getElementById('pin-manage-current')?.value.trim();
+  const newVal     = document.getElementById('pin-manage-new')?.value.trim();
+
+  if (pinManageMode === 'change' || pinManageMode === 'remove') {
+    if (!currentVal || currentVal.length < 4) {
+      showError('pin-manage-error', 'Bitte aktuellen PIN eingeben (mind. 4 Ziffern)'); return;
+    }
+    const curHash = await hashPin(currentVal);
+    if (curHash !== state.family.pinHash) {
+      showError('pin-manage-error', 'Falscher aktueller PIN'); return;
+    }
+  }
+
+  if (pinManageMode === 'remove') {
+    try {
+      await dbUpdateFamily({ pinHash: null });
+      localStorage.removeItem('pin_verified_at');
+      closeSheet('sheet-pin-manage');
+      renderPinSettings();
+    } catch(e) { showError('pin-manage-error', 'Fehler: ' + e.message); }
+    return;
+  }
+
+  if (!newVal || newVal.length < 4) { showError('pin-manage-error', 'Neuer PIN: mind. 4 Ziffern'); return; }
+  if (!/^\d+$/.test(newVal))        { showError('pin-manage-error', 'Nur Ziffern erlaubt'); return; }
+
+  try {
+    const newHash = await hashPin(newVal);
+    await dbUpdateFamily({ pinHash: newHash });
+    localStorage.setItem('pin_verified_at', String(Date.now()));
+    closeSheet('sheet-pin-manage');
+    renderPinSettings();
+  } catch(e) { showError('pin-manage-error', 'Fehler: ' + e.message); }
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1110,6 +1243,8 @@ function renderSettings() {
 
   // Pt 18: Night mode toggles
   renderNightModeSettings();
+  // Pt 26: PIN settings
+  renderPinSettings();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2134,12 +2269,17 @@ function showSetupJoin() {
 async function createFamily() {
   const name   = document.getElementById('input-family-name').value.trim();
   const member = document.getElementById('input-first-member-name').value.trim();
+  const pinVal = document.getElementById('input-setup-pin')?.value.trim() || '';
   if (!name)   { showError('setup-error', 'Bitte Familienname eingeben'); return; }
   if (!member) { showError('setup-error', 'Bitte deinen Namen eingeben'); return; }
-
+  if (pinVal && (pinVal.length < 4 || !/^\d+$/.test(pinVal))) {
+    showError('setup-error', 'PIN: mind. 4 Ziffern (nur Zahlen)'); return;
+  }
   try {
-    const code = await dbCreateFamily(name, member);
+    const pinHash = (pinVal.length >= 4) ? await hashPin(pinVal) : null;
+    const code = await dbCreateFamily(name, member, pinHash);
     localStorage.setItem('familyId', code);
+    if (pinHash) localStorage.setItem('pin_verified_at', String(Date.now()));
     startApp(code);
   } catch (e) {
     showError('setup-error', 'Fehler: ' + e.message);
@@ -2153,11 +2293,23 @@ async function joinFamily() {
     showError('join-error', 'Bitte gültigen Code eingeben (6 oder 12 Zeichen)');
     return;
   }
-
   try {
-    const familyId = await dbJoinFamily(code);
-    localStorage.setItem('familyId', familyId);
-    startApp(familyId);
+    const doc = await db.collection('families').doc(code).get();
+    if (!doc.exists) throw new Error('Familie nicht gefunden');
+    const familyData = doc.data();
+    const doJoin = () => {
+      localStorage.setItem('familyId', code);
+      startApp(code);
+    };
+    if (familyData.pinHash) {
+      state.family = { id: code, ...familyData };
+      showPinPrompt('PIN für diesen Kalender eingeben', () => {
+        localStorage.setItem('pin_verified_at', String(Date.now()));
+        doJoin();
+      });
+    } else {
+      doJoin();
+    }
   } catch (e) {
     showError('join-error', e.message || 'Fehler beim Beitreten');
   }
@@ -2212,6 +2364,9 @@ const App = {
   importICSFromInput,
   // Pt 19: member photo
   handleMemberPhotoInput, removeMemberPhoto,
+  // Pt 26: PIN
+  confirmPin,
+  openSetPIN, openChangePIN, openRemovePIN, savePinManage,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -2248,7 +2403,13 @@ const App = {
   if (savedId) {
     db.collection('families').doc(savedId).get().then(doc => {
       if (doc.exists) {
-        startApp(savedId);
+        const familyData = doc.data();
+        state.family = { id: savedId, ...familyData };
+        if (familyData.pinHash && isPinExpired()) {
+          showPinPrompt('Bitte PIN eingeben', () => startApp(savedId));
+        } else {
+          startApp(savedId);
+        }
       } else {
         localStorage.removeItem('familyId');
         showSetup();
