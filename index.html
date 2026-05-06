@@ -15,6 +15,11 @@
 </head>
 <body>
 
+<!-- Offline Banner (Overlay über allen Screens) -->
+<div id="offline-banner" class="offline-banner hidden">
+  Offline – Änderungen werden synchronisiert sobald du wieder online bist
+</div>
+
 <!-- ══════════════════════════════════════════
      LOADING SCREEN
 ══════════════════════════════════════════ -->
@@ -422,7 +427,7 @@
   <div class="sheet-header">
     <button class="btn-text" onclick="App.closeSheet('sheet-event')">Abbrechen</button>
     <h3 id="sheet-event-title">Termin hinzufügen</h3>
-    <button class="btn-primary-text" onclick="App.saveEvent()">Speichern</button>
+    <button class="btn-primary-text" id="btn-save-event" onclick="App.saveEvent()">Speichern</button>
   </div>
   <div class="sheet-body">
 
@@ -612,7 +617,7 @@
   <div class="sheet-header">
     <button class="btn-text" onclick="App.closeSheet('sheet-member')">Abbrechen</button>
     <h3 id="sheet-member-title">Mitglied hinzufügen</h3>
-    <button class="btn-primary-text" onclick="App.saveMember()">Speichern</button>
+    <button class="btn-primary-text" id="btn-save-member" onclick="App.saveMember()">Speichern</button>
   </div>
   <div class="sheet-body">
     <!-- Pt 19: member photo upload -->
