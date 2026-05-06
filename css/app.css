@@ -1188,6 +1188,16 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 }
 [data-theme="dark"] .code-input { background: var(--surface); }
 
+/* ── Offline Banner ─────────────────────────── */
+.offline-banner {
+  background: var(--warning);
+  color: white;
+  text-align: center;
+  padding: 6px 16px;
+  font-size: .82rem; font-weight: 600;
+  flex-shrink: 0;
+}
+
 /* ── Pt 26: PIN Screen & Inputs ─────────────── */
 #screen-pin {
   position: fixed; inset: 0;
