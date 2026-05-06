@@ -528,9 +528,39 @@ function renderNightModeSettings() {
 //  Pt 26: PIN PROTECTION
 // ════════════════════════════════════════════════════════════════
 
-async function hashPin(pin) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(pin));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2,'0')).join('');
+// saltB64 = null → neuen Salt generieren (beim Setzen); saltB64 = string → bestehenden Salt nutzen (beim Prüfen)
+async function hashPin(pin, saltB64 = null) {
+  const saltBytes = saltB64
+    ? Uint8Array.from(atob(saltB64), c => c.charCodeAt(0))
+    : crypto.getRandomValues(new Uint8Array(16));
+  const key = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: 'PBKDF2', salt: saltBytes, iterations: 200000, hash: 'SHA-256' }, key, 256
+  );
+  const hex  = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2,'0')).join('');
+  const salt = btoa(String.fromCharCode(...saltBytes));
+  return `${salt}:${hex}`;
+}
+
+function checkPinLockout() {
+  const until = parseInt(localStorage.getItem('pin_locked_until') || '0');
+  return Date.now() < until ? Math.ceil((until - Date.now()) / 1000) : 0;
+}
+function recordPinFailure() {
+  const n = parseInt(localStorage.getItem('pin_attempts') || '0') + 1;
+  localStorage.setItem('pin_attempts', String(n));
+  if (n >= 5) {
+    localStorage.setItem('pin_locked_until', String(Date.now() + 60000));
+    localStorage.removeItem('pin_attempts');
+    return true;
+  }
+  return false;
+}
+function clearPinLockout() {
+  localStorage.removeItem('pin_attempts');
+  localStorage.removeItem('pin_locked_until');
 }
 
 function isPinExpired() {
@@ -555,16 +585,27 @@ function showPinPrompt(desc, callback) {
 }
 
 async function confirmPin() {
+  const secs = checkPinLockout();
+  if (secs > 0) { showError('pin-error', `Zu viele Fehlversuche. Bitte noch ${secs}s warten.`); return; }
+
   const inp = document.getElementById('pin-input');
   const pin = inp?.value.trim();
   if (!pin || pin.length < 4) { showError('pin-error', 'Bitte mindestens 4 Ziffern eingeben'); return; }
   if (!/^\d+$/.test(pin))     { showError('pin-error', 'Nur Ziffern erlaubt'); return; }
-  const hash = await hashPin(pin);
-  if (hash !== state.family?.pinHash) {
-    showError('pin-error', 'Falscher PIN. Bitte erneut versuchen.');
+
+  const stored = state.family?.pinHash || '';
+  const [saltB64] = stored.split(':');
+  const computed  = await hashPin(pin, saltB64);
+  if (computed !== stored) {
+    const locked = recordPinFailure();
+    const remaining = 5 - parseInt(localStorage.getItem('pin_attempts') || '0');
+    showError('pin-error', locked
+      ? 'Zu viele Fehlversuche. Bitte 60s warten.'
+      : `Falscher PIN. Noch ${remaining} Versuch${remaining === 1 ? '' : 'e'}.`);
     if (inp) inp.value = '';
     return;
   }
+  clearPinLockout();
   localStorage.setItem('pin_verified_at', String(Date.now()));
   hideEl('screen-pin');
   const cb = pinCallback; pinCallback = null;
@@ -628,13 +669,22 @@ async function savePinManage() {
   const newVal     = document.getElementById('pin-manage-new')?.value.trim();
 
   if (pinManageMode === 'change' || pinManageMode === 'remove') {
+    const secs = checkPinLockout();
+    if (secs > 0) { showError('pin-manage-error', `Gesperrt. Bitte noch ${secs}s warten.`); return; }
     if (!currentVal || currentVal.length < 4) {
       showError('pin-manage-error', 'Bitte aktuellen PIN eingeben (mind. 4 Ziffern)'); return;
     }
-    const curHash = await hashPin(currentVal);
+    const [saltB64cur] = (state.family.pinHash || '').split(':');
+    const curHash = await hashPin(currentVal, saltB64cur);
     if (curHash !== state.family.pinHash) {
-      showError('pin-manage-error', 'Falscher aktueller PIN'); return;
+      const locked = recordPinFailure();
+      const remaining = 5 - parseInt(localStorage.getItem('pin_attempts') || '0');
+      showError('pin-manage-error', locked
+        ? 'Zu viele Fehlversuche. Bitte 60s warten.'
+        : `Falscher PIN. Noch ${remaining} Versuch${remaining === 1 ? '' : 'e'}.`);
+      return;
     }
+    clearPinLockout();
   }
 
   if (pinManageMode === 'remove') {
@@ -1458,30 +1508,37 @@ async function saveMember() {
   const name = document.getElementById('member-name').value.trim();
   if (!name) { showError('member-form-error', 'Bitte Namen eingeben'); return; }
 
-  const members = [...(state.family.members || [])];
-  if (state.editingMemberId) {
-    const idx = members.findIndex(m => m.id === state.editingMemberId);
-    if (idx >= 0) {
-      members[idx] = { ...members[idx], name, color: selectedColor };
-      if (currentMemberPhoto !== null) {
-        if (currentMemberPhoto === '') {
-          delete members[idx].photo;
-        } else {
-          members[idx].photo = currentMemberPhoto;
-        }
-      }
-    }
-  } else {
-    const newMember = { id: genId(), name, color: selectedColor };
-    if (currentMemberPhoto) newMember.photo = currentMemberPhoto;
-    members.push(newMember);
-  }
+  const btn = document.getElementById('btn-save-member');
+  if (btn) { btn.textContent = 'Speichert…'; btn.disabled = true; }
 
   try {
+    const members = [...(state.family.members || [])];
+    if (state.editingMemberId) {
+      const idx = members.findIndex(m => m.id === state.editingMemberId);
+      if (idx >= 0) {
+        members[idx] = { ...members[idx], name, color: selectedColor };
+        if (currentMemberPhoto !== null) {
+          if (currentMemberPhoto === '') {
+            delete members[idx].photo;
+          } else if (currentMemberPhoto.startsWith('data:')) {
+            members[idx].photo = currentMemberPhoto;
+          }
+        }
+      }
+    } else {
+      const memberId = genId();
+      const newMember = { id: memberId, name, color: selectedColor };
+      if (currentMemberPhoto?.startsWith('data:')) {
+        newMember.photo = currentMemberPhoto;
+      }
+      members.push(newMember);
+    }
     await dbUpdateFamily({ members });
     closeSheet('sheet-member');
   } catch (e) {
     showError('member-form-error', 'Fehler beim Speichern: ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = 'Speichern'; btn.disabled = false; }
   }
 }
 
@@ -1804,6 +1861,8 @@ async function saveEvent() {
 
   if (state.editingEventId) data.id = state.editingEventId;
 
+  const btn = document.getElementById('btn-save-event');
+  if (btn) { btn.textContent = 'Speichert…'; btn.disabled = true; }
   try {
     if (state.editingEventId) {
       const existing = state.events.find(e => e.id === state.editingEventId);
@@ -1821,6 +1880,8 @@ async function saveEvent() {
     closeSheet('sheet-event');
   } catch (e) {
     showError('event-form-error', 'Fehler: ' + e.message);
+  } finally {
+    if (btn) { btn.textContent = 'Speichern'; btn.disabled = false; }
   }
 }
 
@@ -2319,11 +2380,20 @@ async function joinFamily() {
 //  APP START
 // ════════════════════════════════════════════════════════════════
 
+function setupOfflineBanner() {
+  const update = () => navigator.onLine ? hideEl('offline-banner') : showEl('offline-banner');
+  window.addEventListener('online',  update);
+  window.addEventListener('offline', update);
+  update();
+}
+
 function startApp(familyId) {
   state.familyId = familyId;
   hideEl('screen-loading');
   hideEl('screen-setup');
+  hideEl('screen-pin');
   showEl('screen-app');
+  setupOfflineBanner();
   subscribeFamily(familyId);
   subscribeEvents(familyId);
   renderHeaderTitle();
