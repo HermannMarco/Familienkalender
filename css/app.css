@@ -979,7 +979,7 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .wg-day {
   flex: 1; position: relative;
   border-left: 1px solid var(--border);
-  min-width: 0; overflow: hidden;
+  min-width: 40px; overflow: hidden;
 }
 .wg-hour {
   height: 48px; border-top: 1px solid var(--border); position: relative;
@@ -1187,3 +1187,22 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   border-color: #ff6b77 !important;
 }
 [data-theme="dark"] .code-input { background: var(--surface); }
+
+/* ── Pt 26: PIN Screen & Inputs ─────────────── */
+#screen-pin {
+  position: fixed; inset: 0;
+  background: var(--surface);
+  display: flex; align-items: center; justify-content: center;
+  overflow-y: auto;
+  z-index: 9000;
+}
+.pin-input-big {
+  font-size: 2rem; font-weight: 700;
+  text-align: center; letter-spacing: 12px;
+  padding: 16px 13px;
+}
+.pin-input-field {
+  font-size: 1.2rem; font-weight: 700;
+  text-align: center; letter-spacing: 8px;
+}
+[data-theme="dark"] #screen-pin { background: var(--surface); }
