@@ -2428,7 +2428,6 @@ function startApp(familyId) {
   hideEl('screen-setup');
   hideEl('screen-pin');
   showEl('screen-app');
-  setupOfflineBanner();
   subscribeFamily(familyId);
   subscribeEvents(familyId);
   renderHeaderTitle();
@@ -2480,14 +2479,20 @@ const App = {
 
 (function init() {
   if (!initFirebase()) {
+    const offline = !navigator.onLine || typeof firebase === 'undefined';
+    const msg = offline
+      ? 'App ist offline und konnte nicht starten.<br>Bitte mit dem Internet verbinden und Seite neu laden.'
+      : 'Firebase-Konfiguration fehlt.<br>Bitte js/firebase-config.js ausfüllen.';
     document.getElementById('screen-loading').innerHTML =
-      '<p style="color:white;padding:24px;text-align:center">Firebase-Konfiguration fehlt.<br>Bitte js/firebase-config.js ausfüllen.</p>';
+      `<p style="color:white;padding:24px;text-align:center">${msg}</p>`;
     return;
   }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
+
+  setupOfflineBanner();
 
   // Pt 18: apply saved theme immediately
   applyTheme();
