@@ -323,11 +323,23 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .month-cell.weekend .cell-day { color: var(--danger); }
 .month-cell.today.weekend .cell-day { color: white; }
 
+.cell-day-row {
+  display: flex; align-items: center; gap: 5px;
+  margin-bottom: 2px;
+  flex-shrink: 0;
+}
+.cell-weekday {
+  font-size: .7rem; font-weight: 600;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+.month-cell.weekend .cell-weekday { color: var(--danger); }
+.month-cell.other-month .cell-weekday { color: #c0c4cc; }
 .cell-day {
   font-size: .95rem; font-weight: 500;
   width: 26px; height: 26px;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 2px;
   flex-shrink: 0;
 }
 .cell-events { display: flex; flex-direction: column; gap: 1px; flex: 1; overflow: hidden; }
@@ -979,7 +991,7 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .wg-day {
   flex: 1; position: relative;
   border-left: 1px solid var(--border);
-  min-width: 52px; overflow: hidden;
+  min-width: 44px; overflow: hidden;
 }
 .wg-hour {
   height: 48px; border-top: 1px solid var(--border); position: relative;
@@ -1246,7 +1258,8 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   .month-cell { min-height: 110px; padding: 8px 7px; }
   .cell-day { font-size: 1.05rem; width: 30px; height: 30px; }
   .month-cell.today .cell-day { width: 30px; height: 30px; }
-  .month-weekdays span { font-size: .9rem; padding: 4px 0; }
+  .cell-weekday { font-size: .85rem; }
+  .cell-day-row { gap: 7px; margin-bottom: 4px; }
   .cell-event-chip { font-size: .92rem; padding: 3px 7px; line-height: 1.4; }
   .cell-more { font-size: .85rem; }
 
