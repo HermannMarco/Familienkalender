@@ -900,8 +900,12 @@ function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
   // Pt 7: Feiertag badge
   const holidayHtml = holiday ? `<div class="cell-holiday" title="${holiday}">${holiday}</div>` : '';
 
+  const weekdayShort = DE_WEEKDAYS_SHORT[dow];
   return `<div class="${cls}" onclick="App.selectDay('${ds}')">
-    <div class="cell-day">${dayNum}</div>
+    <div class="cell-day-row">
+      <span class="cell-weekday">${weekdayShort}</span>
+      <div class="cell-day">${dayNum}</div>
+    </div>
     <div class="cell-events">${chipsHtml}</div>
     ${holidayHtml}
   </div>`;
