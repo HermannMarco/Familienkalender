@@ -1288,4 +1288,22 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   /* Bottom Nav Icons + Labels größer */
   .nav-btn { font-size: .82rem; }
   .nav-btn svg { width: 26px; height: 26px; }
+
+  /* Profilbilder vergrößern (Größe wird sonst inline per JS gesetzt → !important nötig).
+     Geburtstags-Avatare bleiben unverändert (User-Wunsch). */
+  .person-filter-chip img,
+  .person-filter-chip .member-dot {
+    width: 30px !important; height: 30px !important;
+    font-size: .85rem !important;
+  }
+  .member-chip img,
+  .member-chip .member-dot {
+    width: 26px !important; height: 26px !important;
+    font-size: .75rem !important;
+  }
+  .event-block img,
+  .event-block .member-dot {
+    width: 26px !important; height: 26px !important;
+    font-size: .75rem !important;
+  }
 }
