@@ -2415,11 +2415,32 @@ async function joinFamily() {
 //  APP START
 // ════════════════════════════════════════════════════════════════
 
+let _offlineBannerTimer = null;
 function setupOfflineBanner() {
-  const update = () => navigator.onLine ? hideEl('offline-banner') : showEl('offline-banner');
-  window.addEventListener('online',  update);
-  window.addEventListener('offline', update);
-  update();
+  const banner = document.getElementById('offline-banner');
+  if (!banner) return;
+  const hide = () => {
+    banner.classList.add('hidden');
+    if (_offlineBannerTimer) { clearTimeout(_offlineBannerTimer); _offlineBannerTimer = null; }
+  };
+  const show = () => {
+    banner.classList.remove('hidden');
+    if (_offlineBannerTimer) clearTimeout(_offlineBannerTimer);
+    _offlineBannerTimer = setTimeout(hide, 5000);
+  };
+  window.addEventListener('online',  hide);
+  window.addEventListener('offline', show);
+  // iOS Safari verliert nach Rotation manchmal den Text durch stale env(safe-area-inset-top).
+  // Falls Banner gerade sichtbar: kurzer Reflow erzwingen.
+  const reflow = () => {
+    if (banner.classList.contains('hidden')) return;
+    banner.style.display = 'none';
+    void banner.offsetHeight;
+    banner.style.display = '';
+  };
+  window.addEventListener('orientationchange', reflow);
+  window.addEventListener('resize', reflow);
+  if (!navigator.onLine) show();
 }
 
 function startApp(familyId) {
