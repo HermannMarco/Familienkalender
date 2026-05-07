@@ -49,6 +49,7 @@ const state = {
   searchActive: false,
   searchQuery: '',
   holidays: {},
+  uid: null,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -56,12 +57,23 @@ const state = {
 // ════════════════════════════════════════════════════════════════
 
 let db;
+let auth;
 
-function initFirebase() {
+async function initFirebase() {
   try {
     firebase.initializeApp(firebaseConfig);
     db = firebase.firestore();
     db.enablePersistence({ synchronizeTabs: true }).catch(() => {});
+    auth = firebase.auth();
+    // Anonymous Auth: jedes Gerät bekommt eine stabile UID (in IndexedDB persistiert).
+    // Wir warten bis sie sicher verfügbar ist, BEVOR Firestore-Calls laufen.
+    const user = await new Promise((resolve, reject) => {
+      const unsub = auth.onAuthStateChanged(u => {
+        if (u) { unsub(); resolve(u); }
+      }, err => { unsub(); reject(err); });
+      auth.signInAnonymously().catch(err => { unsub(); reject(err); });
+    });
+    state.uid = user.uid;
     return true;
   } catch (e) {
     console.error('Firebase init failed', e);
@@ -242,6 +254,14 @@ function subscribeFamily(familyId) {
           fetchHolidays(yr);
           fetchHolidays(yr + 1);
         }
+        // TODO Phase 2 entfernen: In Phase 1 trägt sich jedes geöffnete Gerät automatisch
+        // in allowedUids ein. Ab Phase 2 läuft das nur noch via expliziten Pairing-Flow.
+        const allowed = state.family.allowedUids || [];
+        if (state.uid && !allowed.includes(state.uid)) {
+          db.collection('families').doc(familyId)
+            .update({ allowedUids: firebase.firestore.FieldValue.arrayUnion(state.uid) })
+            .catch(e => console.warn('Self-register allowedUids fehlgeschlagen', e));
+        }
       } else {
         localStorage.removeItem('familyId');
         location.reload();
@@ -263,16 +283,28 @@ function subscribeEvents(familyId) {
 async function dbCreateFamily(name, firstMemberName, pinHash = null) {
   const code = genCode();
   const member = { id: genId(), name: firstMemberName, color: MEMBER_COLORS[0] };
-  const data = { name, members: [member], createdAt: firebase.firestore.FieldValue.serverTimestamp() };
+  const data = {
+    name,
+    members: [member],
+    allowedUids: state.uid ? [state.uid] : [],
+    createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+  };
   if (pinHash) data.pinHash = pinHash;
   await db.collection('families').doc(code).set(data);
   return code;
 }
 
 async function dbJoinFamily(code) {
-  const doc = await db.collection('families').doc(code.toUpperCase()).get();
+  const upper = code.toUpperCase();
+  const ref = db.collection('families').doc(upper);
+  const doc = await ref.get();
   if (!doc.exists) throw new Error('Familie nicht gefunden');
-  return code.toUpperCase();
+  // Eigene UID ins allowedUids-Array eintragen, damit das Gerät unter den Phase-2-Regeln Zugriff behält.
+  if (state.uid) {
+    try { await ref.update({ allowedUids: firebase.firestore.FieldValue.arrayUnion(state.uid) }); }
+    catch (e) { console.warn('allowedUids update beim Join fehlgeschlagen', e); }
+  }
+  return upper;
 }
 
 async function dbSaveEvent(data) {
@@ -2502,12 +2534,13 @@ const App = {
 //  INIT
 // ════════════════════════════════════════════════════════════════
 
-(function init() {
-  if (!initFirebase()) {
+(async function init() {
+  const ok = await initFirebase();
+  if (!ok) {
     const offline = !navigator.onLine || typeof firebase === 'undefined';
     const msg = offline
       ? 'App ist offline und konnte nicht starten.<br>Bitte mit dem Internet verbinden und Seite neu laden.'
-      : 'Firebase-Konfiguration fehlt.<br>Bitte js/firebase-config.js ausfüllen.';
+      : 'Anmeldung fehlgeschlagen.<br>Bitte Seite neu laden.';
     document.getElementById('screen-loading').innerHTML =
       `<p style="color:white;padding:24px;text-align:center">${msg}</p>`;
     return;
