@@ -1237,6 +1237,82 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 }
 [data-theme="dark"] #screen-pin { background: var(--surface); }
 
+/* ── Phase 2: Pairing-Pending + Geräte-Verwaltung ────── */
+#screen-pairing-pending {
+  position: fixed; inset: 0;
+  background: var(--bg);
+  display: flex; align-items: flex-start; justify-content: center;
+  overflow-y: auto; z-index: 50;
+}
+.pairing-pending-wrap { max-width: 420px; width: 100%; padding-bottom: 32px; }
+.pairing-pending-uid-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  margin-top: 18px;
+}
+.pairing-pending-uid-label {
+  font-size: .82rem; color: var(--text-2); margin-bottom: 6px;
+}
+.pairing-pending-uid-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .9rem; word-break: break-all;
+  background: var(--bg);
+  padding: 10px; border-radius: 8px;
+  margin-bottom: 10px;
+}
+.pairing-pending-qr-wrap {
+  margin-top: 18px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 8px;
+}
+.pairing-pending-qr {
+  display: flex; justify-content: center; align-items: center;
+  min-height: 180px;
+}
+[data-theme="dark"] #screen-pairing-pending { background: var(--surface); }
+
+.device-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: var(--surface);
+}
+.device-uid {
+  flex: 1; min-width: 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: .85rem;
+  word-break: break-all;
+}
+.device-uid code { background: transparent; padding: 0; }
+.device-self {
+  font-family: inherit; color: var(--primary);
+  font-size: .78rem; font-weight: 600;
+  margin-left: 4px;
+}
+
+.add-device-tabs {
+  display: flex; gap: 6px; margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.add-device-tab {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 10px 12px;
+  font-size: .95rem; font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.add-device-tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
 /* ── Desktop / breite Viewports ──────────────────────────
    Greift ab 768px Breite. Mobile Werte oben bleiben default. */
 @media (min-width: 768px) {
