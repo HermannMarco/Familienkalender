@@ -125,6 +125,37 @@
 </div>
 
 <!-- ══════════════════════════════════════════
+     PAIRING PENDING SCREEN (Phase 2)
+══════════════════════════════════════════ -->
+<div id="screen-pairing-pending" class="hidden">
+  <div class="setup-container pairing-pending-wrap">
+    <h1 style="margin-bottom:6px">Gerät freischalten</h1>
+    <p class="setup-subtitle">Familie <code id="pairing-pending-code"></code> ist geschützt.<br>
+       Lass ein bereits eingerichtetes Gerät dieses hier freischalten —<br>
+       Einstellungen → Geräte → „+ Gerät freischalten".</p>
+
+    <div class="pairing-pending-uid-card">
+      <div class="pairing-pending-uid-label">UID dieses Geräts:</div>
+      <div id="pairing-pending-uid" class="pairing-pending-uid-text">…</div>
+      <button id="btn-copy-own-uid" class="btn-secondary btn-full"
+              onclick="App.copyOwnUid()">UID kopieren</button>
+    </div>
+
+    <div class="pairing-pending-qr-wrap">
+      <div class="pairing-pending-uid-label">oder per QR-Code:</div>
+      <div id="pairing-pending-qr" class="pairing-pending-qr"></div>
+    </div>
+
+    <p class="settings-hint" style="margin-top:14px;text-align:center">
+      Sobald freigeschaltet, lädt der Kalender automatisch (Prüfung alle 3 Sek.).
+    </p>
+
+    <button class="btn-text" style="margin-top:18px"
+            onclick="App.leaveFromPairing()">Abbrechen</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      MAIN APP
 ══════════════════════════════════════════ -->
 <div id="screen-app" class="hidden">
@@ -287,6 +318,19 @@
             <div id="family-code-display" class="family-code-big">––––––</div>
             <div class="family-code-hint">Tippen für mehr Optionen</div>
           </div>
+        </section>
+
+        <!-- Phase 2: Geräte mit Zugriff -->
+        <section class="settings-section">
+          <div class="settings-section-head">
+            <h3>Geräte</h3>
+            <button class="btn-icon-text" onclick="App.openAddDevice()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Freischalten
+            </button>
+          </div>
+          <p class="settings-hint">Nur diese Geräte dürfen den Kalender lesen und ändern. Verlorene Geräte hier entfernen.</p>
+          <div id="devices-list"></div>
         </section>
 
         <!-- Pt 7: Bundesland für Feiertage -->
@@ -722,6 +766,44 @@
              maxlength="6" inputmode="numeric" placeholder="Neuer PIN" autocomplete="new-password">
     </div>
     <div id="pin-manage-error" class="error-msg hidden"></div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
+     BOTTOM SHEET: ADD DEVICE (Phase 2)
+══════════════════════════════════════════ -->
+<div id="sheet-add-device" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.closeSheet('sheet-add-device')">Abbrechen</button>
+    <h3>Gerät freischalten</h3>
+    <span style="width:60px"></span>
+  </div>
+  <div class="sheet-body">
+    <div class="add-device-tabs">
+      <button id="tab-add-device-paste" class="add-device-tab active"
+              onclick="App.switchAddDeviceTab('paste')">UID einfügen</button>
+      <button id="tab-add-device-scan" class="add-device-tab"
+              onclick="App.switchAddDeviceTab('scan')">QR scannen</button>
+    </div>
+
+    <div id="add-device-paste-pane">
+      <p class="settings-hint">UID des neuen Geräts (siehe dort der Pairing-Bildschirm):</p>
+      <textarea id="add-device-uid-input" class="form-input"
+                style="font-family:ui-monospace,monospace;min-height:80px;resize:vertical"
+                placeholder="z. B. abc123XYZ…"></textarea>
+      <button class="btn-primary btn-full" style="margin-top:12px"
+              onclick="App.saveAddDevicePaste()">Gerät freischalten</button>
+    </div>
+
+    <div id="add-device-scan-pane" class="hidden">
+      <p id="add-device-scan-status" class="settings-hint"></p>
+      <video id="add-device-video" autoplay muted playsinline
+             style="width:100%;max-height:60vh;background:#000;border-radius:10px"></video>
+    </div>
+
+    <div id="add-device-error" class="error-msg hidden" style="margin-top:12px"></div>
     <div class="sheet-spacer"></div>
   </div>
 </div>
