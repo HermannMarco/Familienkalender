@@ -114,7 +114,11 @@ function addDays(d, n) {
 function startOfWeek(d) {
   const day = d.getDay();
   const diff = (day + 6) % 7;
-  return addDays(d, -diff);
+  const r = addDays(d, -diff);
+  // Bug 4: Wenn d die aktuelle Tageszeit hat, hatte mon dieselbe Tageszeit.
+  // expandEvent vergleicht cur (Mitternacht) mit rangeStart — am Wochen-Montag
+  // war Montag-Mitternacht < rangeStart-Mittag, also fielen tägliche Termine raus.
+  return new Date(r.getFullYear(), r.getMonth(), r.getDate());
 }
 
 // Pt 24: 2-stelliges Jahr
@@ -179,11 +183,45 @@ function expandEvent(event, rangeStart, rangeEnd) {
   const { type, interval = 1, endDate, count } = event.recurring;
   const exceptions = new Set(event.recurring.exceptions || []);
   const instances = [];
-  let cur = new Date(parseDate(event.date));
+  const startDate = parseDate(event.date);
+  const endLimit  = endDate ? parseDate(endDate) : null;
+
+  // Bug 3: wöchentliche Wiederholung mit daysOfWeek (z.B. Di+Do+Sa).
+  // daysOfWeek nutzt JS getDay()-Konventionen (0=So..6=Sa, siehe wday-btn).
+  // Wir iterieren in Wochenblöcken (interval Wochen) und rendern in jedem Block
+  // alle ausgewählten Wochentage, deren Datum >= event.date liegt.
+  if (type === 'weekly' && Array.isArray(event.recurring.daysOfWeek) && event.recurring.daysOfWeek.length) {
+    const daysSet = new Set(event.recurring.daysOfWeek);
+    let weekStart = startOfWeek(startDate);
+    let n = 0;
+    while (true) {
+      if (weekStart > rangeEnd) break;
+      if (endLimit && weekStart > endLimit) break;
+      let stop = false;
+      for (let i = 0; i < 7; i++) {
+        const d = addDays(weekStart, i);
+        if (d < startDate) continue;
+        if (!daysSet.has(d.getDay())) continue;
+        if (endLimit && d > endLimit) { stop = true; break; }
+        if (count != null && n >= count) { stop = true; break; }
+        if (d > rangeEnd) { stop = true; break; }
+        const ds = fmt(d);
+        if (d >= rangeStart && !exceptions.has(ds)) {
+          instances.push({ ...event, date: ds, _recurringInstance: true });
+        }
+        n++;
+      }
+      if (stop) break;
+      weekStart = addDays(weekStart, 7 * interval);
+    }
+    return instances;
+  }
+
+  let cur = new Date(startDate);
   let n = 0;
 
   while (true) {
-    if (endDate && cur > parseDate(endDate)) break;
+    if (endLimit && cur > endLimit) break;
     if (count != null && n >= count) break;
     if (cur > rangeEnd) break;
 
@@ -328,6 +366,17 @@ async function dbUpdateFamily(data) {
 async function dbAddException(eventId, dateStr) {
   await db.collection('families').doc(state.familyId).collection('events').doc(eventId)
     .update({ 'recurring.exceptions': firebase.firestore.FieldValue.arrayUnion(dateStr) });
+}
+
+// Bug 1+1b: Firestore-Schreibvorgänge resolven offline NICHT — die Daten landen
+// zwar lokal im IndexedDB-Cache (und der lokale Listener feuert sofort), aber das
+// Promise wartet bis zur Server-Bestätigung. Beim Speichern eines Termins offline
+// blieb das UI deshalb mit „Speichert…" hängen. Fix: Online → await wie bisher;
+// Offline → fire-and-forget, das UI darf direkt zurückkehren.
+function commitWrite(promise) {
+  if (navigator.onLine) return promise;
+  Promise.resolve(promise).catch(err => console.warn('Offline-Sync später:', err));
+  return Promise.resolve();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1604,7 +1653,7 @@ async function saveMember() {
       }
       members.push(newMember);
     }
-    await dbUpdateFamily({ members });
+    await commitWrite(dbUpdateFamily({ members }));
     closeSheet('sheet-member');
   } catch (e) {
     showError('member-form-error', 'Fehler beim Speichern: ' + e.message);
@@ -1947,7 +1996,7 @@ async function saveEvent() {
         return;
       }
     }
-    await dbSaveEvent(data);
+    await commitWrite(dbSaveEvent(data));
     closeSheet('sheet-event');
   } catch (e) {
     showError('event-form-error', 'Fehler: ' + e.message);
@@ -2095,7 +2144,7 @@ function deleteCurrentEvent() {
   }
 
   if (confirm(`"${ev.title}" löschen?`)) {
-    dbDeleteEvent(detailEventId).then(() => closeSheet('sheet-event-detail'));
+    commitWrite(dbDeleteEvent(detailEventId)).then(() => closeSheet('sheet-event-detail'));
   }
 }
 
@@ -2109,29 +2158,29 @@ async function applyRecurringAction(scope) {
   if (action === 'delete') {
     const instanceDate = state.editingEventData?.date;
     if (scope === 'one') {
-      await dbAddException(evId, instanceDate);
+      await commitWrite(dbAddException(evId, instanceDate));
     } else if (scope === 'following') {
       const endDate = fmt(addDays(parseDate(instanceDate), -1));
-      await db.collection('families').doc(state.familyId).collection('events').doc(evId)
-        .update({ 'recurring.endDate': endDate });
+      await commitWrite(db.collection('families').doc(state.familyId).collection('events').doc(evId)
+        .update({ 'recurring.endDate': endDate }));
     } else {
-      await dbDeleteEvent(evId);
+      await commitWrite(dbDeleteEvent(evId));
     }
   } else if (action === 'edit') {
     const newData = state.editingEventData;
     if (scope === 'all') {
-      await dbSaveEvent(newData);
+      await commitWrite(dbSaveEvent(newData));
     } else if (scope === 'one') {
-      await dbAddException(evId, newData.date);
+      await commitWrite(dbAddException(evId, newData.date));
       const { id: _, ...rest } = newData;
       rest.recurring = { type: 'none' };
-      await dbSaveEvent(rest);
+      await commitWrite(dbSaveEvent(rest));
     } else {
       const endDate = fmt(addDays(parseDate(newData.date), -1));
-      await db.collection('families').doc(state.familyId).collection('events').doc(evId)
-        .update({ 'recurring.endDate': endDate });
+      await commitWrite(db.collection('families').doc(state.familyId).collection('events').doc(evId)
+        .update({ 'recurring.endDate': endDate }));
       const { id: _, ...rest } = newData;
-      await dbSaveEvent(rest);
+      await commitWrite(dbSaveEvent(rest));
     }
   }
 
@@ -2143,15 +2192,15 @@ async function toggleTodo(id, e) {
   if (e) e.stopPropagation();
   const ev = state.events.find(e2 => e2.id === id);
   if (!ev) return;
-  await db.collection('families').doc(state.familyId).collection('events')
-    .doc(id).update({ completed: !ev.completed });
+  await commitWrite(db.collection('families').doc(state.familyId).collection('events')
+    .doc(id).update({ completed: !ev.completed }));
 }
 
 async function toggleTodoFromDetail(id) {
   const ev = state.events.find(e => e.id === id);
   if (!ev) return;
-  await db.collection('families').doc(state.familyId).collection('events')
-    .doc(id).update({ completed: !ev.completed });
+  await commitWrite(db.collection('families').doc(state.familyId).collection('events')
+    .doc(id).update({ completed: !ev.completed }));
   closeSheet('sheet-event-detail');
 }
 
