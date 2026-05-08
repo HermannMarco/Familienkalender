@@ -292,6 +292,8 @@ function subscribeFamily(familyId) {
           fetchHolidays(yr);
           fetchHolidays(yr + 1);
         }
+        // Idee 1: UID-Person-Onboarding triggern, falls noch nicht zugeordnet
+        maybeShowWhoAmI();
       } else {
         localStorage.removeItem('familyId');
         location.reload();
@@ -325,6 +327,9 @@ async function dbCreateFamily(name, firstMemberName, pinHash = null) {
     name,
     members: [member],
     allowedUids: state.uid ? [state.uid] : [],
+    // Idee 1: erstes Gerät wird direkt seinem ersten Member zugeordnet,
+    // damit der Onboarding-Modal beim Familien-Ersteller nicht erscheint.
+    uidToMember: state.uid ? { [state.uid]: member.id } : {},
     createdAt: firebase.firestore.FieldValue.serverTimestamp(),
   };
   if (pinHash) data.pinHash = pinHash;
@@ -482,6 +487,40 @@ function matchesPersonFilter(ev) {
   if (!state.personFilter) return true;
   const ids = ev.memberIds || [];
   return ids[0] === 'all' || ids.includes(state.personFilter);
+}
+
+// ── Idee 1: Private Termine/Todos ────────────────────────
+// UID→Person-Mapping (state.family.uidToMember) ist Single Source of Truth.
+// Privat-Anzeige ist UI-only (Variante A) — Daten in Firestore bleiben Klartext.
+
+function getCurrentMemberId() {
+  if (!state.uid || !state.family) return null;
+  const map = state.family.uidToMember || {};
+  return map[state.uid] || null;
+}
+
+function getMemberIdForUid(uid) {
+  if (!uid || !state.family) return null;
+  return (state.family.uidToMember || {})[uid] || null;
+}
+
+// Ein Event ist „für mich versteckt" wenn es einen privateMemberId hat,
+// der nicht meiner currentMemberId entspricht. Geräte ohne Mapping bekommen
+// nur Placeholder zu sehen (gleich wie Nicht-Eigentümer).
+function isPrivateForOthers(ev) {
+  if (!ev || !ev.privateMemberId) return false;
+  const mine = getCurrentMemberId();
+  return ev.privateMemberId !== mine;
+}
+
+function displayTitle(ev)       { return isPrivateForOthers(ev) ? '🔒 Privat'  : (ev.title || ''); }
+function displayLocation(ev)    { return isPrivateForOthers(ev) ? ''          : (ev.location || ''); }
+function displayDescription(ev) { return isPrivateForOthers(ev) ? ''          : (ev.description || ''); }
+
+// Edit-/Delete-Schutz: nur Ersteller (privateMemberId-Owner) darf private Events ändern.
+function canEditEvent(ev) {
+  if (!ev || !ev.privateMemberId) return true;
+  return ev.privateMemberId === getCurrentMemberId();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -959,7 +998,11 @@ function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
     const ev = sorted[i];
     const bg = getEventBg(ev); // Pt 4: multi-color gradient
     const icon = ev.type === 'geburtstag' ? '🎁 ' : '';
-    const label = `${icon}${ev.title}`;
+    // Idee 1: Privat-Anzeige
+    const hidden = isPrivateForOthers(ev);
+    const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+    const titleDisp = hidden ? '🔒 Privat' : ev.title;
+    const label = hidden ? '🔒 Privat' : `${icon}${ownPriv}${ev.title}`;
 
     // Pt 12: multi-day spanning indicator
     let spanCls = '';
@@ -969,7 +1012,7 @@ function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
       else spanCls = ' span-mid';
     }
 
-    chipsHtml += `<div class="cell-event-chip${spanCls}" style="background:${bg}" title="${ev.title}" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">${label}</div>`;
+    chipsHtml += `<div class="cell-event-chip${spanCls}" style="background:${bg}" title="${titleDisp}" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">${label}</div>`;
   }
   if (sorted.length > MAX) {
     chipsHtml += `<div class="cell-more">+${sorted.length - MAX}</div>`;
@@ -1092,7 +1135,11 @@ function renderWeekView() {
       const span = ev._weekSpan || 1;
       // Pt 12: spanning style
       const spanStyle = span > 1 ? `position:absolute;left:0;width:calc(${span*100}% + ${(span-1)}px);z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;` : '';
-      return `<div class="cell-event-chip${ev._multiDay?' multi-day-chip':''}" style="background:${bg};margin:1px;cursor:pointer;${spanStyle}" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${icon}${ev.title}</div>`;
+      // Idee 1: Privat-Anzeige
+      const hidden = isPrivateForOthers(ev);
+      const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+      const titleHtml = hidden ? '🔒 Privat' : `${icon}${ownPriv}${ev.title}`;
+      return `<div class="cell-event-chip${ev._multiDay?' multi-day-chip':''}" style="background:${bg};margin:1px;cursor:pointer;${spanStyle}" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${titleHtml}</div>`;
     }).join('')}</div>`;
   }
 
@@ -1127,10 +1174,14 @@ function renderWeekView() {
       const top    = sh * H + sm / 60 * H;
       const height = Math.max(22, (eh-sh)*H + (em-sm)/60*H);
       const bg     = getEventBg(ev);
-      // Pt 5: show description snippet
-      const noteHtml = ev.description ? `<span class="eb-note">${ev.description}</span>` : '';
+      // Idee 1: Privat-Anzeige
+      const hidden = isPrivateForOthers(ev);
+      const descDisp = displayDescription(ev);
+      const noteHtml = descDisp ? `<span class="eb-note">${descDisp}</span>` : '';
+      const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+      const titleHtml = hidden ? '🔒 Privat' : `${ev.type==='geburtstag'?'🎁 ':''}${ownPriv}${ev.title}`;
       colHtml += `<div class="event-block" style="background:${bg};top:${top}px;height:${height}px" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">
-        <span>${ev.type==='geburtstag'?'🎁 ':''}${ev.title}</span>
+        <span>${titleHtml}</span>
         <span class="eb-time">${ev.startTime}${ev.endTime?'–'+ev.endTime:''}</span>
         ${noteHtml}
       </div>`;
@@ -1176,7 +1227,11 @@ function renderDayView() {
   alldayEl.innerHTML = holChip + (allDay.length > 0
     ? allDay.map(ev => {
         const bg = getEventBg(ev);
-        return `<div class="cell-event-chip" style="background:${bg};margin:2px;font-size:.8rem;cursor:pointer" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${ev.type==='geburtstag'?'🎁 ':''}${ev.title}</div>`;
+        // Idee 1: Privat-Anzeige
+        const hidden = isPrivateForOthers(ev);
+        const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+        const titleHtml = hidden ? '🔒 Privat' : `${ev.type==='geburtstag'?'🎁 ':''}${ownPriv}${ev.title}`;
+        return `<div class="cell-event-chip" style="background:${bg};margin:2px;font-size:.8rem;cursor:pointer" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${titleHtml}</div>`;
       }).join('')
     : '');
 
@@ -1194,10 +1249,14 @@ function renderDayView() {
     const top    = sh * H + sm / 60 * H;
     const height = Math.max(22, (eh-sh)*H + (em-sm)/60*H);
     const bg     = getEventBg(ev);
-    // Pt 5: description snippet
-    const noteHtml = ev.description ? `<span class="eb-note">${ev.description}</span>` : '';
+    // Idee 1: Privat-Anzeige
+    const hidden = isPrivateForOthers(ev);
+    const descDisp = displayDescription(ev);
+    const noteHtml = descDisp ? `<span class="eb-note">${descDisp}</span>` : '';
+    const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+    const titleHtml = hidden ? '🔒 Privat' : `${ev.type==='geburtstag'?'🎁 ':''}${ownPriv}${ev.title}`;
     colHtml += `<div class="event-block" style="background:${bg};top:${top}px;height:${height}px" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">
-      <span>${ev.type==='geburtstag'?'🎁 ':''}${ev.title}</span>
+      <span>${titleHtml}</span>
       <span class="eb-time">${ev.startTime}${ev.endTime?'–'+ev.endTime:''}</span>
       ${noteHtml}
     </div>`;
@@ -1238,6 +1297,10 @@ function renderEventCard(ev, showDate = false) {
       ? '<span class="member-chip" style="background:#4361ee">Alle</span>'
       : '');
 
+  // Idee 1: privat — Ort und Notiz für andere ausblenden, Titel als „🔒 Privat"
+  const hidden = isPrivateForOthers(ev);
+  const locationDisp = displayLocation(ev);
+
   let meta = '';
   if (ev.endDate && ev.endDate !== ev.date) {
     meta += `${formatDisplayShort(ev.date)} – ${formatDisplayShort(ev.endDate)}`;
@@ -1245,7 +1308,7 @@ function renderEventCard(ev, showDate = false) {
     meta += formatDisplayShort(ev.date) + ' ';
   }
   if (ev.startTime) meta += ` ${ev.startTime}${ev.endTime ? ' – '+ev.endTime : ''}`;
-  if (ev.location) meta += (meta ? ' · ' : '') + `📍 ${ev.location}`;
+  if (locationDisp) meta += (meta ? ' · ' : '') + `📍 ${locationDisp}`;
   if (ev.type === 'geburtstag') {
     const birthDateStr = ev._originalDate || ev.date;
     const displayYear  = ev._birthdayYear || new Date().getFullYear();
@@ -1258,11 +1321,14 @@ function renderEventCard(ev, showDate = false) {
   }
 
   const icon = ev.type === 'geburtstag' ? '🎁 ' : '';
+  // Eigener privater Termin: Schloss-Marker zusätzlich anzeigen
+  const ownPrivIcon = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+  const titleHtml = hidden ? '🔒 Privat' : (icon + ownPrivIcon + ev.title);
 
   return `<div class="event-card" onclick="App.openEventDetail('${ev.id}','${ev.date}')">
     <div class="event-card-bar" style="background:${bg}"></div>
     <div class="event-card-body">
-      <div class="event-card-title">${icon}${ev.title}</div>
+      <div class="event-card-title">${titleHtml}</div>
       ${meta ? `<div class="event-card-meta">${meta.trim()}</div>` : ''}
       ${memberChips ? `<div class="event-card-members">${memberChips}</div>` : ''}
     </div>
@@ -1307,12 +1373,17 @@ function renderTodos() {
     if (ev.date) meta += formatDisplayShort(ev.date);
     if (ev.endDate) meta += (meta ? ' · ' : '') + `Bis: ${formatDisplayShort(ev.endDate)}`;
 
+    // Idee 1: Privat-Anzeige
+    const hidden = isPrivateForOthers(ev);
+    const ownPrivIcon = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+    const titleHtml = hidden ? '🔒 Privat' : (ownPrivIcon + ev.title);
+
     return `<div class="event-card${ev.completed ? ' completed' : ''}">
       <div class="todo-check-wrap">
         <div class="todo-check${ev.completed ? ' done' : ''}" onclick="App.toggleTodo('${ev.id}',event)"></div>
       </div>
       <div class="event-card-body" onclick="App.openEventDetail('${ev.id}','${ev.date||today()}')">
-        <div class="event-card-title">${ev.title}</div>
+        <div class="event-card-title">${titleHtml}</div>
         ${meta ? `<div class="event-card-meta">${meta}</div>` : ''}
         ${memberChips ? `<div class="event-card-members">${memberChips}</div>` : ''}
       </div>
@@ -1484,11 +1555,13 @@ function onSearchInput(val) {
     return;
   }
   const q = val.toLowerCase();
-  const results = state.events.filter(e =>
-    (e.title || '').toLowerCase().includes(q) ||
-    (e.description || '').toLowerCase().includes(q) ||
-    (e.location || '').toLowerCase().includes(q)
-  ).slice(0, 20);
+  // Idee 1: Suche matcht nur eigene private Termine — fremde Klartexte werden ignoriert.
+  const results = state.events.filter(e => {
+    if (isPrivateForOthers(e)) return false;
+    return (e.title || '').toLowerCase().includes(q) ||
+           (e.description || '').toLowerCase().includes(q) ||
+           (e.location || '').toLowerCase().includes(q);
+  }).slice(0, 20);
 
   const el = document.getElementById('search-results');
   if (!el) return;
@@ -1690,6 +1763,9 @@ function openAddEvent(type = 'termin', prefillDate = null, prefillTime = null) {
   document.getElementById('event-recurring').value = 'none';
   document.getElementById('event-description').value = '';
   document.getElementById('event-birthday-person').value = '';
+  // Idee 1: Privat-Checkbox zurücksetzen
+  const privChk0 = document.getElementById('event-private');
+  if (privChk0) privChk0.checked = false;
   document.getElementById('recurring-interval').value = '1';
   document.getElementById('recurring-end-type').value = 'never';
   // Pt 6: reset no-year checkbox
@@ -1744,6 +1820,9 @@ function openEditEvent(eventId, dateStr) {
   document.getElementById('event-location').value = ev.location || '';
   document.getElementById('event-description').value = ev.description || '';
   document.getElementById('event-birthday-person').value = ev.birthdayPerson || '';
+  // Idee 1: Privat-Checkbox setzen wenn der Termin als privat markiert ist
+  const privChk = document.getElementById('event-private');
+  if (privChk) privChk.checked = !!ev.privateMemberId;
 
   // Pt 6: no-year checkbox
   const noYearChk = document.getElementById('event-no-year');
@@ -1825,6 +1904,18 @@ function applyEventTypeUI(type) {
   // Pt 6: show no-year checkbox only for birthdays
   const noYearGroup = document.getElementById('no-year-group');
   if (noYearGroup) noYearGroup.classList.toggle('hidden', !isBirthday);
+
+  // Idee 1: Privat-Checkbox nur für Termine und Todos sichtbar — UND nur wenn
+  // dieses Gerät einer Person zugeordnet ist (sonst gibt's keinen Owner zum Setzen).
+  const privGroup = document.getElementById('event-private-group');
+  if (privGroup) {
+    const allowed = !isBirthday && !!getCurrentMemberId();
+    privGroup.classList.toggle('hidden', !allowed);
+    if (!allowed) {
+      const privChk2 = document.getElementById('event-private');
+      if (privChk2) privChk2.checked = false;
+    }
+  }
 }
 
 function setEventType(type) {
@@ -1962,6 +2053,25 @@ async function saveEvent() {
     }
   }
 
+  // Idee 1: privateMemberId setzen, wenn Privat-Checkbox aktiv ist und das Gerät
+  // einer Person zugeordnet ist. Für Geburtstage bleibt privateMemberId immer null.
+  let privateMemberId = null;
+  const privChkSave = document.getElementById('event-private');
+  if (currentEventType !== 'geburtstag' && privChkSave?.checked) {
+    privateMemberId = getCurrentMemberId();
+  }
+  // Beim Edit: wenn ein bestehender privater Eintrag von jemand anders geöffnet wurde
+  // (defensive — der Button wird unten ausgeblendet), den ursprünglichen Owner respektieren.
+  if (state.editingEventId) {
+    const existing = state.events.find(e => e.id === state.editingEventId);
+    if (existing?.privateMemberId && existing.privateMemberId !== getCurrentMemberId()) {
+      // Fremder privater Termin → wir hätten gar nicht hier sein dürfen.
+      showError('event-form-error', 'Fremde private Termine können nicht geändert werden.');
+      return;
+    }
+    // Wenn Checkbox aus, aber bestehend privat: User entfernt die Privat-Markierung — OK.
+  }
+
   const data = {
     type: currentEventType,
     title,
@@ -1974,11 +2084,13 @@ async function saveEvent() {
     memberIds,
     recurring: recurring || { type: 'none' },
     completed: false,
+    privateMemberId,
   };
 
   if (currentEventType === 'geburtstag') {
     data.recurring = { type: 'yearly', interval: 1 };
     data.endDate = null; // Pt 10.2
+    data.privateMemberId = null;
   }
 
   if (state.editingEventId) data.id = state.editingEventId;
@@ -2026,8 +2138,16 @@ function openEventDetail(id, dateStr) {
 
   const bg = getEventBg(ev);
   const icon = ev.type === 'geburtstag' ? '🎁 ' : '';
+  // Idee 1: Edit/Delete-Buttons im Header ausblenden, wenn Termin fremd-privat ist
+  const editable = canEditEvent(ev);
+  const editBtn  = document.querySelector('#sheet-event-detail .hdr-actions');
+  if (editBtn) editBtn.style.visibility = editable ? '' : 'hidden';
+
+  const hidden = isPrivateForOthers(ev);
+  const ownPrivIcon = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+  const titleDisp = hidden ? '🔒 Privat' : `${icon}${ownPrivIcon}${ev.title}`;
   let html = `<div class="detail-color-bar" style="background:${bg}"></div>`;
-  html += `<div class="detail-title">${icon}${ev.title}</div>`;
+  html += `<div class="detail-title">${titleDisp}</div>`;
 
   // Date row
   const dateRangeLabel = (ev.endDate && ev.endDate !== ev.date)
@@ -2073,11 +2193,12 @@ function openEventDetail(id, dateStr) {
     </div>`;
   }
 
-  // Location
-  if (ev.location) {
+  // Location (Idee 1: bei fremd-privat ausblenden)
+  const locDisp = displayLocation(ev);
+  if (locDisp) {
     html += `<div class="detail-meta-row">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-      ${ev.location}
+      ${locDisp}
     </div>`;
   }
 
@@ -2104,9 +2225,10 @@ function openEventDetail(id, dateStr) {
     </div>`;
   }
 
-  // Pt 25.b: todo/termin description/note
-  if (ev.description && ev.type !== 'geburtstag') {
-    html += `<div style="margin-top:14px;padding:12px;background:var(--bg);border-radius:8px;font-size:.9rem;color:var(--text-2);white-space:pre-wrap">${ev.description}</div>`;
+  // Pt 25.b: todo/termin description/note (Idee 1: bei fremd-privat ausblenden)
+  const descDisp2 = displayDescription(ev);
+  if (descDisp2 && ev.type !== 'geburtstag') {
+    html += `<div style="margin-top:14px;padding:12px;background:var(--bg);border-radius:8px;font-size:.9rem;color:var(--text-2);white-space:pre-wrap">${descDisp2}</div>`;
   }
 
   // Todo status
@@ -2126,6 +2248,12 @@ function openEventDetail(id, dateStr) {
 
 function editCurrentEvent() {
   if (!detailEventId) return;
+  const ev = state.events.find(e => e.id === detailEventId);
+  // Idee 1: defensiver Edit-Schutz für fremde private Termine
+  if (ev && !canEditEvent(ev)) {
+    alert('Dieser Termin ist privat — nur der Ersteller kann ihn ändern.');
+    return;
+  }
   closeSheet('sheet-event-detail');
   setTimeout(() => openEditEvent(detailEventId, detailEventDate), 350);
 }
@@ -2134,6 +2262,11 @@ function deleteCurrentEvent() {
   if (!detailEventId) return;
   const ev = state.events.find(e => e.id === detailEventId);
   if (!ev) return;
+  // Idee 1: defensiver Delete-Schutz
+  if (!canEditEvent(ev)) {
+    alert('Dieser Termin ist privat — nur der Ersteller kann ihn löschen.');
+    return;
+  }
 
   if (ev.recurring && ev.recurring.type !== 'none') {
     state.editingEventData = { id: detailEventId, date: detailEventDate };
@@ -2145,7 +2278,7 @@ function deleteCurrentEvent() {
     return;
   }
 
-  if (confirm(`"${ev.title}" löschen?`)) {
+  if (confirm(`"${displayTitle(ev)}" löschen?`)) {
     commitWrite(dbDeleteEvent(detailEventId)).then(() => closeSheet('sheet-event-detail'));
   }
 }
@@ -2194,6 +2327,8 @@ async function toggleTodo(id, e) {
   if (e) e.stopPropagation();
   const ev = state.events.find(e2 => e2.id === id);
   if (!ev) return;
+  // Idee 1: fremd-private Todos darf niemand außer dem Ersteller togglen
+  if (!canEditEvent(ev)) return;
   await commitWrite(db.collection('families').doc(state.familyId).collection('events')
     .doc(id).update({ completed: !ev.completed }));
 }
@@ -2201,6 +2336,7 @@ async function toggleTodo(id, e) {
 async function toggleTodoFromDetail(id) {
   const ev = state.events.find(e => e.id === id);
   if (!ev) return;
+  if (!canEditEvent(ev)) return;
   await commitWrite(db.collection('families').doc(state.familyId).collection('events')
     .doc(id).update({ completed: !ev.completed }));
   closeSheet('sheet-event-detail');
@@ -2545,28 +2681,60 @@ function renderDevicesSettings() {
   const list = document.getElementById('devices-list');
   if (!list) return;
   const allowed = state.family?.allowedUids || [];
+  const map     = state.family?.uidToMember || {};
+  const members = state.family?.members || [];
   if (!allowed.length) {
     list.innerHTML = '<p style="color:var(--text-2);font-size:.9rem">Noch keine Geräte registriert.</p>';
     return;
   }
   list.innerHTML = allowed.map(u => {
-    const isMe = (u === state.uid);
-    const short = u.slice(0, 8) + '…' + u.slice(-4);
+    const isMe   = (u === state.uid);
+    const short  = u.slice(0, 8) + '…' + u.slice(-4);
+    const mappedId = map[u];
+    const mappedMember = mappedId ? members.find(m => m.id === mappedId) : null;
+
+    let personLine;
+    if (mappedMember) {
+      // Idee 1: Zuordnung ist immutable — als gesperrte Anzeige zeigen.
+      personLine = `<div class="device-person-locked">→ ${mappedMember.name} <span class="device-locked-hint">(festgelegt)</span></div>`;
+    } else if (members.length) {
+      const opts = members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+      personLine = `<select class="device-person-select"
+                          onchange="App.assignDeviceToMember('${u}', this.value)">
+        <option value="">– Person zuordnen –</option>
+        ${opts}
+      </select>`;
+    } else {
+      personLine = `<div class="device-person-locked" style="color:var(--text-2)">– keine Personen vorhanden –</div>`;
+    }
+
     return `<div class="device-row">
-      <div class="device-uid"><code>${short}</code>${isMe ? ' <span class="device-self">(dieses Gerät)</span>' : ''}</div>
+      <div class="device-row-main">
+        <div class="device-uid"><code>${short}</code>${isMe ? ' <span class="device-self">(dieses Gerät)</span>' : ''}</div>
+        ${personLine}
+      </div>
       ${isMe ? '' : `<button class="member-edit-btn" onclick="App.removeDevice('${u}')">Entfernen</button>`}
     </div>`;
   }).join('');
 }
 
-async function unlockDevice(uidToAdd) {
+async function unlockDevice(uidToAdd, memberId = null) {
   const uid = (uidToAdd || '').trim();
   if (!isValidUid(uid)) {
     return { ok: false, msg: 'Ungültige UID (28 Zeichen, Buchstaben + Zahlen erwartet).' };
   }
+  // Idee 1: Wenn beim Pairing direkt eine Person ausgewählt wurde, schreiben wir
+  // allowedUids + uidToMember in einem Update, damit das neue Gerät sofort einsatzbereit ist.
+  const update = {
+    allowedUids: firebase.firestore.FieldValue.arrayUnion(uid),
+  };
+  if (memberId) {
+    const member = (state.family?.members || []).find(m => m.id === memberId);
+    if (!member) return { ok: false, msg: 'Person nicht gefunden.' };
+    update[`uidToMember.${uid}`] = memberId;
+  }
   try {
-    await commitWrite(db.collection('families').doc(state.familyId)
-      .update({ allowedUids: firebase.firestore.FieldValue.arrayUnion(uid) }));
+    await commitWrite(db.collection('families').doc(state.familyId).update(update));
     return { ok: true, msg: 'Gerät freigeschaltet.' };
   } catch (e) {
     return { ok: false, msg: 'Fehler: ' + (e.message || 'unbekannt') };
@@ -2580,10 +2748,75 @@ async function removeDevice(uidToRemove) {
   }
   if (!confirm(`Gerät ${uidToRemove.slice(0,8)}… wirklich entfernen? Es verliert ab sofort den Zugriff.`)) return;
   try {
-    await commitWrite(db.collection('families').doc(state.familyId)
-      .update({ allowedUids: firebase.firestore.FieldValue.arrayRemove(uidToRemove) }));
+    // Beim Entfernen auch das uidToMember-Mapping aufräumen, sonst bleiben tote Einträge stehen.
+    const update = {
+      allowedUids: firebase.firestore.FieldValue.arrayRemove(uidToRemove),
+    };
+    update[`uidToMember.${uidToRemove}`] = firebase.firestore.FieldValue.delete();
+    await commitWrite(db.collection('families').doc(state.familyId).update(update));
   } catch (e) {
     alert('Fehler beim Entfernen: ' + (e.message || 'unbekannt'));
+  }
+}
+
+// Onboarding-Modal: zeigt sich automatisch wenn das aktuelle Gerät noch keiner Person zugeordnet ist.
+let _whoamiShown = false;
+function maybeShowWhoAmI() {
+  if (_whoamiShown) return;
+  if (!state.uid || !state.family) return;
+  // App-Screen muss schon offen sein — sonst überlagert das Sheet einen Setup-Screen.
+  if (document.getElementById('screen-app').classList.contains('hidden')) return;
+  const map = state.family.uidToMember || {};
+  if (map[state.uid]) return; // schon zugeordnet
+  const members = state.family.members || [];
+  if (!members.length) return; // keine Personen vorhanden → später nochmal probieren
+  _whoamiShown = true;
+  renderWhoAmI();
+  openSheet('sheet-whoami');
+}
+
+function renderWhoAmI() {
+  const members = state.family?.members || [];
+  const list = document.getElementById('whoami-members');
+  if (!list) return;
+  list.innerHTML = members.map(m => `
+    <div class="whoami-row" onclick="App.confirmWhoAmI('${m.id}')">
+      ${getMemberAvatar(m,'md')}
+      <div class="whoami-name">${m.name}</div>
+    </div>
+  `).join('');
+  hideError('whoami-error');
+}
+
+async function confirmWhoAmI(memberId) {
+  if (!confirm('Diese Zuordnung kann nicht mehr geändert werden. Fortfahren?')) return;
+  try {
+    const update = {};
+    update[`uidToMember.${state.uid}`] = memberId;
+    await commitWrite(db.collection('families').doc(state.familyId).update(update));
+    closeSheet('sheet-whoami');
+  } catch (e) {
+    showError('whoami-error', 'Fehler: ' + (e.message || 'unbekannt'));
+  }
+}
+
+// Erstmalige Zuordnung einer UID → Person. Immutable: wenn bereits gesetzt, abbrechen.
+async function assignDeviceToMember(uid, memberId) {
+  if (!uid || !memberId) return;
+  const map = state.family?.uidToMember || {};
+  if (map[uid]) {
+    alert('Dieses Gerät ist bereits einer Person zugeordnet und kann nicht geändert werden.');
+    return;
+  }
+  if (!isValidUid(uid)) { alert('Ungültige UID.'); return; }
+  const member = (state.family?.members || []).find(m => m.id === memberId);
+  if (!member) { alert('Person nicht gefunden.'); return; }
+  try {
+    const update = {};
+    update[`uidToMember.${uid}`] = memberId;
+    await commitWrite(db.collection('families').doc(state.familyId).update(update));
+  } catch (e) {
+    alert('Fehler beim Zuordnen: ' + (e.message || 'unbekannt'));
   }
 }
 
@@ -2595,8 +2828,21 @@ let _scannerRaf    = null;
 function openAddDevice() {
   document.getElementById('add-device-uid-input').value = '';
   hideError('add-device-error');
+  // Idee 1: Member-Dropdown füllen (Person für das neue Gerät)
+  const sel = document.getElementById('add-device-member');
+  if (sel) {
+    const members = state.family?.members || [];
+    sel.innerHTML = '<option value="">– Person wählen –</option>' +
+      members.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+    sel.value = '';
+  }
   switchAddDeviceTab('paste');
   openSheet('sheet-add-device');
+}
+
+function _getAddDeviceMemberId() {
+  const sel = document.getElementById('add-device-member');
+  return sel ? sel.value : '';
 }
 
 function switchAddDeviceTab(which) {
@@ -2612,7 +2858,9 @@ function switchAddDeviceTab(which) {
 async function saveAddDevicePaste() {
   hideError('add-device-error');
   const val = document.getElementById('add-device-uid-input').value;
-  const res = await unlockDevice(val);
+  const memberId = _getAddDeviceMemberId();
+  if (!memberId) { showError('add-device-error', 'Bitte zuerst eine Person auswählen.'); return; }
+  const res = await unlockDevice(val, memberId);
   if (!res.ok) { showError('add-device-error', res.msg); return; }
   closeSheet('sheet-add-device');
 }
@@ -2662,8 +2910,15 @@ async function startScanner() {
         const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
         if (code && code.data) {
           const candidate = code.data.trim();
+          const memberId = _getAddDeviceMemberId();
+          if (!memberId) {
+            // Person muss vor dem Scan gewählt sein — sonst nicht freischalten
+            stopScanner();
+            showError('add-device-error', 'Bitte zuerst eine Person auswählen, dann erneut scannen.');
+            return;
+          }
           stopScanner();
-          unlockDevice(candidate).then(res => {
+          unlockDevice(candidate, memberId).then(res => {
             if (res.ok) closeSheet('sheet-add-device');
             else        showError('add-device-error', res.msg);
           });
@@ -2858,6 +3113,8 @@ const App = {
   copyOwnUid, leaveFromPairing,
   openAddDevice, switchAddDeviceTab, saveAddDevicePaste,
   unlockDevice, removeDevice,
+  // Idee 1: Privat-Termine
+  assignDeviceToMember, confirmWhoAmI,
 };
 
 // ════════════════════════════════════════════════════════════════
