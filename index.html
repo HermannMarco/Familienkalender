@@ -616,6 +616,16 @@
       <textarea id="event-description" class="form-textarea" placeholder="Notiz..."></textarea>
     </div>
 
+    <!-- Idee 1: Privat-Checkbox (nur Termine + Todos, nicht Geburtstage) -->
+    <div class="form-group" id="event-private-group">
+      <label class="private-toggle" for="event-private">
+        <input type="checkbox" id="event-private">
+        <span class="private-icon-open">🔓</span>
+        <span class="private-icon-locked">🔒</span>
+        <span class="private-label">Privat — nur ich sehe Inhalt</span>
+      </label>
+    </div>
+
     <div id="event-form-error" class="error-msg hidden"></div>
     <div class="sheet-spacer"></div>
   </div>
@@ -771,6 +781,24 @@
 </div>
 
 <!-- ══════════════════════════════════════════
+     BOTTOM SHEET: WHO AM I? (Idee 1 — UID→Person Onboarding)
+══════════════════════════════════════════ -->
+<div id="sheet-whoami" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <span style="width:60px"></span>
+    <h3>Wer bist du?</h3>
+    <span style="width:60px"></span>
+  </div>
+  <div class="sheet-body">
+    <p class="settings-hint">Damit private Termine und Todos auf diesem Gerät funktionieren, ordne es einer Person in der Familie zu.<br><strong>Diese Zuordnung kann später nicht mehr geändert werden.</strong></p>
+    <div id="whoami-members"></div>
+    <div id="whoami-error" class="error-msg hidden" style="margin-top:12px"></div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      BOTTOM SHEET: ADD DEVICE (Phase 2)
 ══════════════════════════════════════════ -->
 <div id="sheet-add-device" class="bottom-sheet hidden">
@@ -781,6 +809,15 @@
     <span style="width:60px"></span>
   </div>
   <div class="sheet-body">
+    <!-- Idee 1: Person-Auswahl beim Pairing — gilt für beide Tabs -->
+    <div class="form-group">
+      <label class="form-label">Person für dieses Gerät</label>
+      <select id="add-device-member" class="form-select">
+        <option value="">– Person wählen –</option>
+      </select>
+      <p class="settings-hint" style="margin-top:6px">Diese Zuordnung kann später nicht geändert werden.</p>
+    </div>
+
     <div class="add-device-tabs">
       <button id="tab-add-device-paste" class="add-device-tab active"
               onclick="App.switchAddDeviceTab('paste')">UID einfügen</button>
