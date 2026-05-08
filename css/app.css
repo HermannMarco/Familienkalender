@@ -1274,15 +1274,15 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 [data-theme="dark"] #screen-pairing-pending { background: var(--surface); }
 
 .device-row {
-  display: flex; align-items: center; gap: 10px;
+  display: flex; align-items: flex-start; gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-bottom: 8px;
   background: var(--surface);
 }
+.device-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .device-uid {
-  flex: 1; min-width: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .85rem;
   word-break: break-all;
@@ -1293,6 +1293,55 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   font-size: .78rem; font-weight: 600;
   margin-left: 4px;
 }
+.device-person-select {
+  font-size: .9rem;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  width: 100%;
+}
+.device-person-locked {
+  font-size: .9rem; color: var(--text);
+  padding: 4px 0;
+}
+.device-locked-hint { color: var(--text-2); font-size: .78rem; margin-left: 4px; }
+
+/* Idee 1: Privat-Checkbox im Event-/Todo-Form ─────────── */
+.private-toggle {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.private-toggle input[type="checkbox"] {
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+}
+.private-toggle .private-icon-locked,
+.private-toggle .private-icon-open { font-size: 1.25rem; line-height: 1; }
+.private-toggle .private-icon-locked { display: none; }
+.private-toggle input[type="checkbox"]:checked ~ .private-icon-open   { display: none; }
+.private-toggle input[type="checkbox"]:checked ~ .private-icon-locked { display: inline; }
+.private-label { font-size: .95rem; color: var(--text); }
+.private-toggle input[type="checkbox"]:checked ~ .private-label {
+  font-weight: 600; color: var(--primary);
+}
+
+.whoami-row {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin-bottom: 8px;
+  background: var(--surface);
+  cursor: pointer;
+}
+.whoami-row:active { background: var(--bg); }
+.whoami-name { font-size: 1.05rem; font-weight: 600; }
 
 .add-device-tabs {
   display: flex; gap: 6px; margin-bottom: 14px;
