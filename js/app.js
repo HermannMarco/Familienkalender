@@ -292,19 +292,19 @@ function subscribeFamily(familyId) {
           fetchHolidays(yr);
           fetchHolidays(yr + 1);
         }
-        // TODO Phase 2 entfernen: In Phase 1 trägt sich jedes geöffnete Gerät automatisch
-        // in allowedUids ein. Ab Phase 2 läuft das nur noch via expliziten Pairing-Flow.
-        const allowed = state.family.allowedUids || [];
-        if (state.uid && !allowed.includes(state.uid)) {
-          db.collection('families').doc(familyId)
-            .update({ allowedUids: firebase.firestore.FieldValue.arrayUnion(state.uid) })
-            .catch(e => console.warn('Self-register allowedUids fehlgeschlagen', e));
-        }
       } else {
         localStorage.removeItem('familyId');
         location.reload();
       }
-    }, err => console.error('Family listen error', err));
+    }, err => {
+      // Phase 2: Wenn die UID aus allowedUids entfernt wurde, kommt hier ein
+      // permission-denied. Dann zurück auf Pairing-Pending — kein Auto-Lockout-Loop.
+      if (err && err.code === 'permission-denied') {
+        showPairingPending(familyId);
+      } else {
+        console.error('Family listen error', err);
+      }
+    });
 }
 
 function subscribeEvents(familyId) {
@@ -335,13 +335,10 @@ async function dbCreateFamily(name, firstMemberName, pinHash = null) {
 async function dbJoinFamily(code) {
   const upper = code.toUpperCase();
   const ref = db.collection('families').doc(upper);
+  // Phase 2: kein automatisches arrayUnion mehr — der Caller muss permission-denied
+  // abfangen und die Pairing-Pending-Logik anstoßen.
   const doc = await ref.get();
   if (!doc.exists) throw new Error('Familie nicht gefunden');
-  // Eigene UID ins allowedUids-Array eintragen, damit das Gerät unter den Phase-2-Regeln Zugriff behält.
-  if (state.uid) {
-    try { await ref.update({ allowedUids: firebase.firestore.FieldValue.arrayUnion(state.uid) }); }
-    catch (e) { console.warn('allowedUids update beim Join fehlgeschlagen', e); }
-  }
   return upper;
 }
 
@@ -1415,6 +1412,8 @@ function renderSettings() {
   renderNightModeSettings();
   // Pt 26: PIN settings
   renderPinSettings();
+  // Phase 2: Geräte-Liste
+  renderDevicesSettings();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1517,6 +1516,8 @@ function openSheet(id) {
 function closeSheet(id) {
   const el = document.getElementById(id);
   if (!el) return;
+  // Phase 2: Kamera-Stream sicher stoppen, falls das Add-Device-Sheet schließt
+  if (id === 'sheet-add-device' && typeof stopScanner === 'function') stopScanner();
   el.classList.remove('open');
   el.addEventListener('transitionend', () => el.classList.add('hidden'), { once: true });
   const anyOpen = document.querySelectorAll('.bottom-sheet.open').length > 0;
@@ -1527,6 +1528,7 @@ function closeSheet(id) {
 }
 
 function closeAllSheets() {
+  if (typeof stopScanner === 'function') stopScanner();
   document.querySelectorAll('.bottom-sheet.open').forEach(el => {
     el.classList.remove('open');
     el.addEventListener('transitionend', () => el.classList.add('hidden'), { once: true });
@@ -2422,6 +2424,274 @@ function confirmLeave() {
 }
 
 // ════════════════════════════════════════════════════════════════
+//  PHASE 2: PAIRING (UID-basierter Zugriff via allowedUids)
+// ════════════════════════════════════════════════════════════════
+
+// Firebase-Auth-UIDs sind 28-stellige alphanumerische Strings.
+function isValidUid(s) {
+  return typeof s === 'string' && /^[A-Za-z0-9]{20,40}$/.test(s.trim());
+}
+
+let _pairingPollTimer = null;
+let _pairingFamilyId  = null;
+
+function showPairingPending(familyId) {
+  _pairingFamilyId = familyId;
+  // Listener stoppen, falls einer aus dem alten startApp-Pfad noch läuft.
+  if (state.unsubFamily) { state.unsubFamily(); state.unsubFamily = null; }
+  if (state.unsubEvents) { state.unsubEvents(); state.unsubEvents = null; }
+
+  hideEl('screen-loading');
+  hideEl('screen-setup');
+  hideEl('screen-pin');
+  hideEl('screen-app');
+  showEl('screen-pairing-pending');
+
+  const uidEl  = document.getElementById('pairing-pending-uid');
+  const codeEl = document.getElementById('pairing-pending-code');
+  if (uidEl)  uidEl.textContent  = state.uid || '(keine UID — Auth fehlgeschlagen)';
+  if (codeEl) codeEl.textContent = formatCode(familyId) || '';
+
+  renderPairingPendingQR();
+
+  if (_pairingPollTimer) clearInterval(_pairingPollTimer);
+  _pairingPollTimer = setInterval(() => pollPairingAccess(familyId), 3000);
+}
+
+async function pollPairingAccess(familyId) {
+  if (!state.uid) return;
+  try {
+    const doc = await db.collection('families').doc(familyId).get();
+    if (!doc.exists) return;
+    const allowed = doc.data().allowedUids || [];
+    if (allowed.includes(state.uid)) {
+      clearInterval(_pairingPollTimer);
+      _pairingPollTimer = null;
+      hideEl('screen-pairing-pending');
+      const familyData = doc.data();
+      state.family = { id: familyId, ...familyData };
+      localStorage.setItem('familyId', familyId);
+      if (familyData.pinHash && isPinExpired()) {
+        showPinPrompt('Bitte PIN eingeben', () => startApp(familyId));
+      } else {
+        startApp(familyId);
+      }
+    }
+  } catch (e) {
+    // permission-denied weiterhin → ignorieren, wir warten.
+  }
+}
+
+async function copyOwnUid() {
+  if (!state.uid) return;
+  try {
+    await navigator.clipboard.writeText(state.uid);
+    const btn = document.getElementById('btn-copy-own-uid');
+    if (btn) { btn.textContent = 'Kopiert ✓'; setTimeout(() => btn.textContent = 'UID kopieren', 2000); }
+  } catch {
+    alert('UID:\n' + state.uid);
+  }
+}
+
+function leaveFromPairing() {
+  if (confirm('Pairing abbrechen und zurück zur Familienauswahl?')) {
+    if (_pairingPollTimer) { clearInterval(_pairingPollTimer); _pairingPollTimer = null; }
+    localStorage.removeItem('familyId');
+    location.reload();
+  }
+}
+
+// QR-Lib lazy-load (~5 KB, gstatic-Cache → nach 1× online verfügbar)
+let _qrLibPromise = null;
+function loadQrLib() {
+  if (_qrLibPromise) return _qrLibPromise;
+  _qrLibPromise = new Promise((resolve, reject) => {
+    if (typeof window.qrcode === 'function') return resolve(window.qrcode);
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js';
+    s.onload = () => resolve(window.qrcode);
+    s.onerror = () => reject(new Error('QR-Bibliothek konnte nicht geladen werden'));
+    document.head.appendChild(s);
+  });
+  return _qrLibPromise;
+}
+
+async function renderPairingPendingQR() {
+  const wrap = document.getElementById('pairing-pending-qr');
+  if (!wrap || !state.uid) return;
+  wrap.innerHTML = '<div style="color:var(--text-2);font-size:.85rem">QR wird geladen…</div>';
+  try {
+    const qrcode = await loadQrLib();
+    const qr = qrcode(0, 'M');
+    qr.addData(state.uid);
+    qr.make();
+    wrap.innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2 });
+    const svg = wrap.querySelector('svg');
+    if (svg) {
+      svg.style.width  = '180px';
+      svg.style.height = '180px';
+      svg.style.background = '#fff';
+      svg.style.borderRadius = '8px';
+      svg.style.padding = '6px';
+    }
+  } catch (e) {
+    wrap.innerHTML = '<div style="color:var(--danger);font-size:.85rem">QR konnte nicht geladen werden (offline?)</div>';
+  }
+}
+
+// Geräte-Verwaltung in Settings ────────────────────────────
+
+function renderDevicesSettings() {
+  const list = document.getElementById('devices-list');
+  if (!list) return;
+  const allowed = state.family?.allowedUids || [];
+  if (!allowed.length) {
+    list.innerHTML = '<p style="color:var(--text-2);font-size:.9rem">Noch keine Geräte registriert.</p>';
+    return;
+  }
+  list.innerHTML = allowed.map(u => {
+    const isMe = (u === state.uid);
+    const short = u.slice(0, 8) + '…' + u.slice(-4);
+    return `<div class="device-row">
+      <div class="device-uid"><code>${short}</code>${isMe ? ' <span class="device-self">(dieses Gerät)</span>' : ''}</div>
+      ${isMe ? '' : `<button class="member-edit-btn" onclick="App.removeDevice('${u}')">Entfernen</button>`}
+    </div>`;
+  }).join('');
+}
+
+async function unlockDevice(uidToAdd) {
+  const uid = (uidToAdd || '').trim();
+  if (!isValidUid(uid)) {
+    return { ok: false, msg: 'Ungültige UID (28 Zeichen, Buchstaben + Zahlen erwartet).' };
+  }
+  try {
+    await commitWrite(db.collection('families').doc(state.familyId)
+      .update({ allowedUids: firebase.firestore.FieldValue.arrayUnion(uid) }));
+    return { ok: true, msg: 'Gerät freigeschaltet.' };
+  } catch (e) {
+    return { ok: false, msg: 'Fehler: ' + (e.message || 'unbekannt') };
+  }
+}
+
+async function removeDevice(uidToRemove) {
+  if (uidToRemove === state.uid) {
+    alert('Dieses Gerät kannst du nicht selbst entfernen — sonst sperrst du dich aus. Verwende stattdessen „Dieses Gerät trennen".');
+    return;
+  }
+  if (!confirm(`Gerät ${uidToRemove.slice(0,8)}… wirklich entfernen? Es verliert ab sofort den Zugriff.`)) return;
+  try {
+    await commitWrite(db.collection('families').doc(state.familyId)
+      .update({ allowedUids: firebase.firestore.FieldValue.arrayRemove(uidToRemove) }));
+  } catch (e) {
+    alert('Fehler beim Entfernen: ' + (e.message || 'unbekannt'));
+  }
+}
+
+// Sheet „Gerät freischalten" ───────────────────────────────
+
+let _scannerStream = null;
+let _scannerRaf    = null;
+
+function openAddDevice() {
+  document.getElementById('add-device-uid-input').value = '';
+  hideError('add-device-error');
+  switchAddDeviceTab('paste');
+  openSheet('sheet-add-device');
+}
+
+function switchAddDeviceTab(which) {
+  const isPaste = which === 'paste';
+  document.getElementById('tab-add-device-paste').classList.toggle('active',  isPaste);
+  document.getElementById('tab-add-device-scan').classList.toggle('active', !isPaste);
+  document.getElementById('add-device-paste-pane').classList.toggle('hidden', !isPaste);
+  document.getElementById('add-device-scan-pane').classList.toggle('hidden',   isPaste);
+  if (!isPaste) startScanner();
+  else stopScanner();
+}
+
+async function saveAddDevicePaste() {
+  hideError('add-device-error');
+  const val = document.getElementById('add-device-uid-input').value;
+  const res = await unlockDevice(val);
+  if (!res.ok) { showError('add-device-error', res.msg); return; }
+  closeSheet('sheet-add-device');
+}
+
+// Scanner-Lib lazy-load (~40 KB, einmalig).
+let _jsqrPromise = null;
+function loadJsQR() {
+  if (_jsqrPromise) return _jsqrPromise;
+  _jsqrPromise = new Promise((resolve, reject) => {
+    if (typeof window.jsQR === 'function') return resolve(window.jsQR);
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js';
+    s.onload = () => resolve(window.jsQR);
+    s.onerror = () => reject(new Error('Scanner-Bibliothek konnte nicht geladen werden'));
+    document.head.appendChild(s);
+  });
+  return _jsqrPromise;
+}
+
+async function startScanner() {
+  const video = document.getElementById('add-device-video');
+  const status = document.getElementById('add-device-scan-status');
+  const errEl  = document.getElementById('add-device-error');
+  if (errEl) errEl.classList.add('hidden');
+  if (status) status.textContent = 'Kamera wird gestartet…';
+
+  try {
+    const jsQR = await loadJsQR();
+    _scannerStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment' },
+    });
+    video.srcObject = _scannerStream;
+    video.setAttribute('playsinline', 'true');
+    await video.play();
+    if (status) status.textContent = 'Halte den QR-Code des neuen Geräts in die Kamera.';
+
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    const tick = () => {
+      if (!_scannerStream) return;
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width  = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(img.data, img.width, img.height, { inversionAttempts: 'dontInvert' });
+        if (code && code.data) {
+          const candidate = code.data.trim();
+          stopScanner();
+          unlockDevice(candidate).then(res => {
+            if (res.ok) closeSheet('sheet-add-device');
+            else        showError('add-device-error', res.msg);
+          });
+          return;
+        }
+      }
+      _scannerRaf = requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) {
+    if (status) status.textContent = '';
+    showError('add-device-error',
+      'Kamera nicht verfügbar: ' + (e.message || 'Berechtigung verweigert'));
+  }
+}
+
+function stopScanner() {
+  if (_scannerRaf) { cancelAnimationFrame(_scannerRaf); _scannerRaf = null; }
+  if (_scannerStream) {
+    _scannerStream.getTracks().forEach(t => t.stop());
+    _scannerStream = null;
+  }
+  const video = document.getElementById('add-device-video');
+  if (video) video.srcObject = null;
+}
+
+
+// ════════════════════════════════════════════════════════════════
 //  SETUP FLOW
 // ════════════════════════════════════════════════════════════════
 
@@ -2492,6 +2762,13 @@ async function joinFamily() {
       doJoin();
     }
   } catch (e) {
+    // Phase 2: Wenn das Family-Doc unter den neuen Rules nicht lesbar ist
+    // (eigene UID nicht in allowedUids), zeigen wir den Pairing-Pending-Screen.
+    if (e && e.code === 'permission-denied') {
+      localStorage.setItem('familyId', code);
+      showPairingPending(code);
+      return;
+    }
     showError('join-error', e.message || 'Fehler beim Beitreten');
   }
 }
@@ -2577,6 +2854,10 @@ const App = {
   // Pt 26: PIN
   confirmPin,
   openSetPIN, openChangePIN, openRemovePIN, savePinManage,
+  // Phase 2: Pairing / Geräte
+  copyOwnUid, leaveFromPairing,
+  openAddDevice, switchAddDeviceTab, saveAddDevicePaste,
+  unlockDevice, removeDevice,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -2631,8 +2912,14 @@ const App = {
         localStorage.removeItem('familyId');
         showSetup();
       }
-    }).catch(() => {
-      startApp(savedId);
+    }).catch(err => {
+      // Phase 2: permission-denied → Pairing-Pending. Bei anderen Fehlern (z.B. offline)
+      // optimistisch starten und auf den Listener vertrauen — wie vorher.
+      if (err && err.code === 'permission-denied') {
+        showPairingPending(savedId);
+      } else {
+        startApp(savedId);
+      }
     });
   } else {
     showSetup();
