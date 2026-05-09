@@ -50,6 +50,9 @@ const state = {
   searchQuery: '',
   holidays: {},
   uid: null,
+  notificationStatus: 'unknown',
+  hasPushSubscription: false,
+  pendingOpenEvent: null,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -317,6 +320,14 @@ function subscribeEvents(familyId) {
       renderCalendar();
       renderTodos();
       renderBirthdays();
+      // Idee 2: pending Notification-Click öffnen, sobald Event geladen ist
+      if (state.pendingOpenEvent) {
+        const { eventId, date } = state.pendingOpenEvent;
+        if (state.events.some(e => e.id === eventId)) {
+          state.pendingOpenEvent = null;
+          openEventFromUrl(eventId, date);
+        }
+      }
     }, err => console.error('Events listen error', err));
 }
 
@@ -368,6 +379,18 @@ async function dbUpdateFamily(data) {
 async function dbAddException(eventId, dateStr) {
   await db.collection('families').doc(state.familyId).collection('events').doc(eventId)
     .update({ 'recurring.exceptions': firebase.firestore.FieldValue.arrayUnion(dateStr) });
+}
+
+async function dbSavePushSubscription(uid, subJson) {
+  await db.collection('families').doc(state.familyId).update({
+    [`pushSubscriptions.${uid}`]: { ...subJson, createdAt: firebase.firestore.FieldValue.serverTimestamp() }
+  });
+}
+
+async function dbRemovePushSubscription(uid) {
+  await db.collection('families').doc(state.familyId).update({
+    [`pushSubscriptions.${uid}`]: firebase.firestore.FieldValue.delete()
+  });
 }
 
 // Bug 1+1b: Firestore-Schreibvorgänge resolven offline NICHT — die Daten landen
@@ -1485,6 +1508,8 @@ function renderSettings() {
   renderPinSettings();
   // Phase 2: Geräte-Liste
   renderDevicesSettings();
+  // Idee 2: Notifications-Status
+  refreshPushStatus();
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1788,6 +1813,7 @@ function openAddEvent(type = 'termin', prefillDate = null, prefillTime = null) {
   applyEventTypeUI(type);
   renderMembersSelector([]);
   applyPrivateLock(false);
+  renderReminders([]);
 
   if (prefillDate) {
     const d = parseDate(prefillDate);
@@ -1875,6 +1901,7 @@ function openEditEvent(eventId, dateStr) {
   applyEventTypeUI(ev.type);
   renderMembersSelector(ev.memberIds || []);
   applyPrivateLock(!!ev.privateMemberId);
+  renderReminders(ev.reminders || []);
   hideError('event-form-error');
   openSheet('sheet-event');
 }
@@ -2120,6 +2147,7 @@ async function saveEvent() {
     recurring: recurring || { type: 'none' },
     completed: false,
     privateMemberId,
+    reminders: collectRemindersFromForm(),
   };
 
   if (currentEventType === 'geburtstag') {
@@ -3119,6 +3147,253 @@ function startApp(familyId) {
 }
 
 // ════════════════════════════════════════════════════════════════
+//  IDEE 2: PUSH-ERINNERUNGEN
+// ════════════════════════════════════════════════════════════════
+
+function isPushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+}
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+async function refreshPushStatus() {
+  if (!isPushSupported()) {
+    state.notificationStatus = 'unsupported';
+    state.hasPushSubscription = false;
+  } else {
+    state.notificationStatus = Notification.permission;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      state.hasPushSubscription = !!sub;
+    } catch {
+      state.hasPushSubscription = false;
+    }
+  }
+  renderNotificationsSettings();
+}
+
+function renderNotificationsSettings() {
+  const statusEl = document.getElementById('notifications-status');
+  const btn = document.getElementById('notifications-toggle-btn');
+  if (!statusEl || !btn) return;
+
+  if (state.notificationStatus === 'unsupported') {
+    statusEl.textContent = 'Dieses Gerät unterstützt keine Push-Benachrichtigungen.';
+    btn.style.display = 'none';
+    return;
+  }
+  btn.style.display = '';
+
+  if (state.hasPushSubscription && state.notificationStatus === 'granted') {
+    statusEl.textContent = '✅ Aktiv auf diesem Gerät';
+    btn.textContent = 'Deaktivieren';
+  } else if (state.notificationStatus === 'denied') {
+    statusEl.textContent = '❌ Vom Browser blockiert. In den Browser-/iOS-Einstellungen Benachrichtigungen für diese App erlauben, dann erneut aktivieren.';
+    btn.textContent = 'Aktivieren';
+  } else {
+    statusEl.textContent = 'Nicht aktiviert';
+    btn.textContent = 'Aktivieren';
+  }
+}
+
+async function toggleNotifications() {
+  if (state.hasPushSubscription) {
+    await disableNotifications();
+  } else {
+    await enableNotifications();
+  }
+}
+
+async function enableNotifications() {
+  if (!isPushSupported()) {
+    alert('Dieses Gerät unterstützt keine Push-Benachrichtigungen.');
+    return;
+  }
+  if (!state.familyId || !state.uid) {
+    alert('Familie noch nicht geladen. Bitte kurz warten.');
+    return;
+  }
+  try {
+    const perm = await Notification.requestPermission();
+    state.notificationStatus = perm;
+    if (perm !== 'granted') {
+      renderNotificationsSettings();
+      return;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    await dbSavePushSubscription(state.uid, sub.toJSON());
+    state.hasPushSubscription = true;
+    renderNotificationsSettings();
+  } catch (err) {
+    console.error('enableNotifications failed:', err);
+    alert('Aktivieren fehlgeschlagen: ' + (err.message || err));
+  }
+}
+
+async function disableNotifications() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await sub.unsubscribe();
+    if (state.uid && state.familyId) await dbRemovePushSubscription(state.uid);
+    state.hasPushSubscription = false;
+    renderNotificationsSettings();
+  } catch (err) {
+    console.error('disableNotifications failed:', err);
+  }
+}
+
+// — Reminder-UI im Event-Form ─────────────────────────────────────
+
+const REMINDER_PRESETS = [
+  { value: 5,     label: '5 Minuten vorher' },
+  { value: 15,    label: '15 Minuten vorher' },
+  { value: 30,    label: '30 Minuten vorher' },
+  { value: 60,    label: '1 Stunde vorher' },
+  { value: 120,   label: '2 Stunden vorher' },
+  { value: 1440,  label: '1 Tag vorher' },
+  { value: 2880,  label: '2 Tage vorher' },
+  { value: 10080, label: '1 Woche vorher' },
+  { value: 20160, label: '2 Wochen vorher' },
+];
+const REMINDER_MAX = 3;
+
+function decomposeOffset(min) {
+  const w = Math.floor(min / 10080); min -= w * 10080;
+  const d = Math.floor(min / 1440);  min -= d * 1440;
+  const h = Math.floor(min / 60);    min -= h * 60;
+  return { w, d, h, m: min };
+}
+
+function renderReminders(list) {
+  const container = document.getElementById('reminders-list');
+  if (!container) return;
+  container.innerHTML = '';
+  (list || []).forEach(r => addReminderRow(r.offsetMinutes));
+  updateReminderAddBtn();
+}
+
+function updateReminderAddBtn() {
+  const btn = document.getElementById('reminders-add-btn');
+  const list = document.getElementById('reminders-list');
+  if (!btn || !list) return;
+  btn.disabled = list.children.length >= REMINDER_MAX;
+}
+
+function addReminderRow(offsetMinutes) {
+  const list = document.getElementById('reminders-list');
+  if (!list || list.children.length >= REMINDER_MAX) return;
+
+  const row = document.createElement('div');
+  row.className = 'reminder-row-wrap';
+
+  const isPreset = offsetMinutes != null && REMINDER_PRESETS.some(p => p.value === offsetMinutes);
+  const isCustom = offsetMinutes != null && !isPreset;
+  const selectedVal = offsetMinutes == null ? 15 : (isCustom ? 'custom' : offsetMinutes);
+
+  const presetOptions = REMINDER_PRESETS.map(p =>
+    `<option value="${p.value}"${p.value === selectedVal ? ' selected' : ''}>${p.label}</option>`
+  ).join('');
+
+  row.innerHTML = `
+    <div class="reminder-row">
+      <select class="reminder-select" onchange="App.onReminderSelectChange(this)">
+        ${presetOptions}
+        <option value="custom"${isCustom ? ' selected' : ''}>Benutzerdefiniert…</option>
+      </select>
+      <button type="button" class="reminder-remove-btn" onclick="App.removeReminderRow(this)" aria-label="Entfernen">×</button>
+    </div>
+    <div class="reminder-custom" style="display:none">
+      <div><input type="number" min="0" class="rc-w" placeholder="0"><div class="reminder-custom-label">Wochen</div></div>
+      <div><input type="number" min="0" class="rc-d" placeholder="0"><div class="reminder-custom-label">Tage</div></div>
+      <div><input type="number" min="0" class="rc-h" placeholder="0"><div class="reminder-custom-label">Stunden</div></div>
+      <div><input type="number" min="0" class="rc-m" placeholder="0"><div class="reminder-custom-label">Minuten</div></div>
+    </div>
+  `;
+  list.appendChild(row);
+
+  if (isCustom) {
+    const parts = decomposeOffset(offsetMinutes);
+    row.querySelector('.rc-w').value = parts.w || '';
+    row.querySelector('.rc-d').value = parts.d || '';
+    row.querySelector('.rc-h').value = parts.h || '';
+    row.querySelector('.rc-m').value = parts.m || '';
+    row.querySelector('.reminder-custom').style.display = '';
+  }
+  updateReminderAddBtn();
+}
+
+function onReminderSelectChange(selectEl) {
+  const wrap = selectEl.closest('.reminder-row-wrap');
+  const customBox = wrap.querySelector('.reminder-custom');
+  customBox.style.display = (selectEl.value === 'custom') ? '' : 'none';
+}
+
+function removeReminderRow(btnEl) {
+  const wrap = btnEl.closest('.reminder-row-wrap');
+  if (wrap) wrap.remove();
+  updateReminderAddBtn();
+}
+
+function openEventFromUrl(eventId, dateStr) {
+  if (!eventId) return;
+  const ev = state.events.find(e => e.id === eventId);
+  if (!ev) {
+    state.pendingOpenEvent = { eventId, date: dateStr };
+    return;
+  }
+  const target = dateStr || ev.date;
+  const d = parseDate(target);
+  if (d) {
+    state.currentDate = d;
+    state.currentView = 'tag';
+    state.currentTab = 'kalender';
+    renderCalendar();
+    setTab('kalender');
+  }
+  setTimeout(() => openEventDetail(eventId, target), 100);
+}
+
+function collectRemindersFromForm() {
+  const list = document.getElementById('reminders-list');
+  if (!list) return [];
+  const out = [];
+  for (const wrap of list.children) {
+    const sel = wrap.querySelector('.reminder-select');
+    if (!sel) continue;
+    let off;
+    if (sel.value === 'custom') {
+      const w = parseInt(wrap.querySelector('.rc-w').value) || 0;
+      const d = parseInt(wrap.querySelector('.rc-d').value) || 0;
+      const h = parseInt(wrap.querySelector('.rc-h').value) || 0;
+      const m = parseInt(wrap.querySelector('.rc-m').value) || 0;
+      off = w * 10080 + d * 1440 + h * 60 + m;
+      if (off <= 0) continue;
+    } else {
+      off = parseInt(sel.value);
+      if (!off || off <= 0) continue;
+    }
+    out.push({ offsetMinutes: off });
+  }
+  return out;
+}
+
+// ════════════════════════════════════════════════════════════════
 //  PUBLIC API
 // ════════════════════════════════════════════════════════════════
 
@@ -3162,6 +3437,9 @@ const App = {
   unlockDevice, removeDevice,
   // Idee 1: Privat-Termine
   assignDeviceToMember, confirmWhoAmI,
+  // Idee 2: Push-Erinnerungen
+  toggleNotifications,
+  addReminderRow, removeReminderRow, onReminderSelectChange,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -3182,7 +3460,24 @@ const App = {
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
+    // Idee 2: Notification-Click vom SW empfangen
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'open-event') {
+        openEventFromUrl(event.data.eventId, event.data.date);
+      }
+    });
   }
+
+  // Idee 2: ?openEvent=&date= aus URL übernehmen (öffnet Termin-Detail nach Events-Load)
+  try {
+    const params = new URLSearchParams(location.search);
+    const evId = params.get('openEvent');
+    const evDate = params.get('date');
+    if (evId) {
+      state.pendingOpenEvent = { eventId: evId, date: evDate };
+      history.replaceState(null, '', location.pathname);
+    }
+  } catch {}
 
   setupOfflineBanner();
 
