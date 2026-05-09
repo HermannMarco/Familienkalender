@@ -6,3 +6,5 @@ const firebaseConfig = {
   messagingSenderId: "180930765584",
   appId:             "1:180930765584:web:a2b39041896e7ec47d3b95"
 };
+
+const VAPID_PUBLIC_KEY = "BCDV6VsPl5TX8tlQZj_b0dlZJ9YfWboT9Bh4aPhQwQUe8xiDWXk8oyiNdidEPwc70v1dz6RBX2o_HsNLBU7Ji74";
