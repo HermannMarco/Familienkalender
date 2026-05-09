@@ -1787,6 +1787,7 @@ function openAddEvent(type = 'termin', prefillDate = null, prefillTime = null) {
   document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === type));
   applyEventTypeUI(type);
   renderMembersSelector([]);
+  applyPrivateLock(false);
 
   if (prefillDate) {
     const d = parseDate(prefillDate);
@@ -1873,6 +1874,7 @@ function openEditEvent(eventId, dateStr) {
   document.querySelectorAll('.type-btn').forEach(b => b.classList.toggle('active', b.dataset.type === ev.type));
   applyEventTypeUI(ev.type);
   renderMembersSelector(ev.memberIds || []);
+  applyPrivateLock(!!ev.privateMemberId);
   hideError('event-form-error');
   openSheet('sheet-event');
 }
@@ -1914,6 +1916,7 @@ function applyEventTypeUI(type) {
     if (!allowed) {
       const privChk2 = document.getElementById('event-private');
       if (privChk2) privChk2.checked = false;
+      applyPrivateLock(false);
     }
   }
 }
@@ -2005,6 +2008,38 @@ function toggleMember(id) {
     return c && c.classList.contains('checked');
   });
   if (!anySelected && allCheck) allCheck.classList.add('checked');
+}
+
+// Bugfix: bei aktiver Privat-Checkbox wird die Personen-Auswahl auf den
+// aktiven User gezwungen; alle anderen Reihen werden ausgegraut/blockiert.
+// Beim Deaktivieren wird die Sperre wieder gelöst (Auswahl bleibt stehen).
+function applyPrivateLock(locked) {
+  const selector = document.getElementById('event-members-selector');
+  if (!selector) return;
+  const allRow = selector.querySelector('.member-select-row');
+  const memberRows = selector.querySelectorAll('.member-select-row');
+
+  if (locked) {
+    const myId = getCurrentMemberId();
+    if (!myId) return; // kein Owner zum Setzen → still no-op
+    const allCheck = document.getElementById('check-all');
+    if (allCheck) allCheck.classList.remove('checked');
+    (state.family?.members || []).forEach(m => {
+      const c = document.getElementById(`check-${m.id}`);
+      if (c) c.classList.toggle('checked', m.id === myId);
+    });
+    memberRows.forEach(row => {
+      const isMine = row.getAttribute('onclick') === `App.toggleMember('${myId}')`;
+      row.classList.toggle('disabled', !isMine);
+    });
+  } else {
+    memberRows.forEach(row => row.classList.remove('disabled'));
+  }
+}
+
+function onPrivateToggle() {
+  const chk = document.getElementById('event-private');
+  applyPrivateLock(!!(chk && chk.checked));
 }
 
 async function saveEvent() {
@@ -2550,6 +2585,17 @@ async function copyFamilyCode() {
   }
 }
 
+async function copyFamilyUrl() {
+  const url = 'https://hermannmarco.github.io/Familienkalender/';
+  const btn = document.querySelectorAll('#sheet-pairing .btn-secondary')[1];
+  try {
+    await navigator.clipboard.writeText(url);
+    if (btn) { btn.textContent = 'Kopiert! ✓'; setTimeout(() => btn.textContent = 'URL kopieren', 2000); }
+  } catch {
+    alert('URL: ' + url);
+  }
+}
+
 function confirmLeave() {
   if (confirm('Dieses Gerät vom Familienkalender trennen? Der Kalender wird nicht gelöscht.')) {
     if (state.unsubFamily) state.unsubFamily();
@@ -3090,9 +3136,10 @@ const App = {
   openAddMember, openEditMember, saveMember,
   selectColor,
   toggleAllMembers, toggleMember,
+  onPrivateToggle,
   toggleTime, toggleRecurringOptions, toggleRecurringEnd,
   setEventType,
-  openPairing, copyFamilyCode, confirmLeave,
+  openPairing, copyFamilyCode, copyFamilyUrl, confirmLeave,
   closeSheet, closeAllSheets,
   // Pt 11: search
   toggleSearch, onSearchInput,
