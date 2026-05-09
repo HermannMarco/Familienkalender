@@ -619,7 +619,7 @@
     <!-- Idee 1: Privat-Checkbox (nur Termine + Todos, nicht Geburtstage) -->
     <div class="form-group" id="event-private-group">
       <label class="private-toggle" for="event-private">
-        <input type="checkbox" id="event-private">
+        <input type="checkbox" id="event-private" onchange="App.onPrivateToggle()">
         <span class="private-icon-open">🔓</span>
         <span class="private-icon-locked">🔒</span>
         <span class="private-label">Privat — nur ich sehe Inhalt</span>
@@ -711,6 +711,9 @@
     <div id="pairing-code-big" class="pairing-code"></div>
     <button class="btn-secondary btn-full" onclick="App.copyFamilyCode()">
       Code kopieren
+    </button>
+    <button class="btn-secondary btn-full" onclick="App.copyFamilyUrl()" style="margin-top:8px">
+      URL kopieren
     </button>
     <div class="pairing-steps">
       <h4>So funktioniert es:</h4>
