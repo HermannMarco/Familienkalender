@@ -869,6 +869,7 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   cursor: pointer;
 }
 .member-select-row:last-child { border-bottom: none; }
+.member-select-row.disabled { opacity: 0.4; pointer-events: none; }
 .member-select-check {
   width: 22px; height: 22px;
   border: 2px solid var(--border);
