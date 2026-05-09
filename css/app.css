@@ -1434,3 +1434,46 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
     font-size: 1rem !important;
   }
 }
+
+/* ── Idee 2: Erinnerungen ─────────────────────────────── */
+.reminder-row {
+  display: flex; gap: 8px; align-items: center;
+  margin-bottom: 8px;
+}
+.reminder-row select {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 1rem;
+}
+.reminder-remove-btn {
+  background: transparent; border: none;
+  color: var(--text-2);
+  font-size: 1.4rem; line-height: 1;
+  cursor: pointer; padding: 4px 8px;
+  flex-shrink: 0;
+}
+.reminder-remove-btn:hover { color: var(--danger, #e63946); }
+.reminder-custom {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  margin: 4px 0 12px 0;
+}
+.reminder-custom input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: center;
+  font-size: .95rem;
+}
+.reminder-custom-label {
+  font-size: .75rem;
+  color: var(--text-2);
+  text-align: center;
+  margin-top: 2px;
+}
+#reminders-add-btn:disabled { opacity: 0.4; cursor: default; }
