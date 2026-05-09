@@ -405,6 +405,14 @@
           <div id="pin-settings-actions" style="display:flex;flex-direction:column;gap:8px"></div>
         </section>
 
+        <!-- Idee 2: Push-Erinnerungen -->
+        <section class="settings-section">
+          <h3>Erinnerungen</h3>
+          <p class="settings-hint">Push-Benachrichtigungen für Termine, Todos und Geburtstage. Pro Gerät einzeln aktivieren.</p>
+          <p id="notifications-status" class="settings-hint" style="margin:8px 0"></p>
+          <button id="notifications-toggle-btn" class="btn-secondary btn-full" onclick="App.toggleNotifications()">Aktivieren</button>
+        </section>
+
         <section class="settings-section">
           <h3>Familie</h3>
           <div id="family-name-display" class="settings-family-name"></div>
@@ -614,6 +622,13 @@
     <div class="form-group">
       <label class="form-label">Notiz (optional)</label>
       <textarea id="event-description" class="form-textarea" placeholder="Notiz..."></textarea>
+    </div>
+
+    <!-- Idee 2: Erinnerungen -->
+    <div class="form-group" id="event-reminders-group">
+      <label class="form-label">Erinnerungen</label>
+      <div id="reminders-list"></div>
+      <button type="button" id="reminders-add-btn" class="btn-text" onclick="App.addReminderRow()">+ Erinnerung hinzufügen</button>
     </div>
 
     <!-- Idee 1: Privat-Checkbox (nur Termine + Todos, nicht Geburtstage) -->
