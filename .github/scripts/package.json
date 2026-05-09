@@ -1,0 +1,15 @@
+{
+  "name": "familienkalender-reminders",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub-Actions-Cron: liest fällige Erinnerungen aus Firestore und schickt Web-Push.",
+  "main": "send-reminders.js",
+  "scripts": {
+    "start": "node send-reminders.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0",
+    "luxon": "^3.5.0",
+    "web-push": "^3.6.7"
+  }
+}
