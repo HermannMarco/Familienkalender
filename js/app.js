@@ -2577,20 +2577,119 @@ async function importICSFromInput(evt) {
   const file = evt.target.files?.[0];
   if (!file) return;
   const statusEl = document.getElementById('ical-import-status');
-  if (statusEl) { statusEl.textContent = 'Importiere...'; statusEl.classList.remove('hidden'); }
+  if (statusEl) statusEl.classList.add('hidden');
   try {
     const text = await file.text();
     const events = parseICS(text);
-    let count = 0;
-    for (const ev of events) {
-      try { await dbSaveEvent(ev); count++; } catch {}
-    }
-    if (statusEl) statusEl.textContent = `✓ ${count} Termine importiert`;
     evt.target.value = '';
-    setTimeout(() => statusEl?.classList.add('hidden'), 4000);
+    if (events.length === 0) {
+      if (statusEl) {
+        statusEl.textContent = 'Keine Termine in der Datei gefunden';
+        statusEl.classList.remove('hidden');
+        setTimeout(() => statusEl.classList.add('hidden'), 4000);
+      }
+      return;
+    }
+    state.icalPending = events;
+    openIcalImportSheet(events);
   } catch (e) {
-    if (statusEl) statusEl.textContent = 'Fehler beim Import';
+    if (statusEl) {
+      statusEl.textContent = 'Fehler beim Lesen der Datei';
+      statusEl.classList.remove('hidden');
+      setTimeout(() => statusEl.classList.add('hidden'), 4000);
+    }
   }
+}
+
+function openIcalImportSheet(events) {
+  const info = document.getElementById('ical-import-info');
+  if (info) info.textContent = `${events.length} Termin${events.length === 1 ? '' : 'e'} gefunden. Wähle Personen für die Zuordnung — Standard: Alle.`;
+  renderIcalMembersSelector(['all']);
+  openSheet('sheet-ical-import');
+}
+
+function renderIcalMembersSelector(selectedIds) {
+  const members = state.family?.members || [];
+  const isAll = selectedIds.length === 0 || selectedIds[0] === 'all';
+  let html = '';
+  html += `<div class="member-select-row" onclick="App.toggleIcalAllMembers()">
+    <div class="member-select-check${isAll ? ' checked' : ''}" id="ical-check-all"></div>
+    <div class="member-select-dot" style="background:#4361ee">A</div>
+    <div class="member-select-name">Alle</div>
+  </div>`;
+  for (const m of members) {
+    const sel = !isAll && selectedIds.includes(m.id);
+    html += `<div class="member-select-row" onclick="App.toggleIcalMember('${m.id}')">
+      <div class="member-select-check${sel ? ' checked' : ''}" id="ical-check-${m.id}"></div>
+      ${getMemberAvatar(m,'sm')}
+      <div class="member-select-dot" style="background:${m.color}">${initials(m.name)}</div>
+      <div class="member-select-name">${m.name}</div>
+    </div>`;
+  }
+  setHTML('ical-members-selector', html);
+}
+
+function toggleIcalAllMembers() {
+  const allCheck = document.getElementById('ical-check-all');
+  if (!allCheck) return;
+  const wasAll = allCheck.classList.contains('checked');
+  if (!wasAll) {
+    allCheck.classList.add('checked');
+    (state.family?.members || []).forEach(m => {
+      const el = document.getElementById(`ical-check-${m.id}`);
+      if (el) el.classList.remove('checked');
+    });
+  }
+}
+
+function toggleIcalMember(id) {
+  const el = document.getElementById(`ical-check-${id}`);
+  if (!el) return;
+  const allCheck = document.getElementById('ical-check-all');
+  if (allCheck) allCheck.classList.remove('checked');
+  el.classList.toggle('checked');
+  const anySelected = (state.family?.members || []).some(m => {
+    const c = document.getElementById(`ical-check-${m.id}`);
+    return c && c.classList.contains('checked');
+  });
+  if (!anySelected && allCheck) allCheck.classList.add('checked');
+}
+
+function getIcalSelectedMemberIds() {
+  const allCheck = document.getElementById('ical-check-all');
+  if (allCheck && allCheck.classList.contains('checked')) return ['all'];
+  const members = state.family?.members || [];
+  const ids = members.filter(m => {
+    const el = document.getElementById(`ical-check-${m.id}`);
+    return el && el.classList.contains('checked');
+  }).map(m => m.id);
+  return ids.length > 0 ? ids : ['all'];
+}
+
+async function confirmIcalImport() {
+  const events = state.icalPending || [];
+  const statusEl = document.getElementById('ical-import-status');
+  if (events.length === 0) { closeSheet('sheet-ical-import'); return; }
+  const memberIds = getIcalSelectedMemberIds();
+  closeSheet('sheet-ical-import');
+  if (statusEl) {
+    statusEl.textContent = 'Importiere...';
+    statusEl.classList.remove('hidden');
+  }
+  let count = 0;
+  for (const ev of events) {
+    try { await dbSaveEvent({ ...ev, memberIds }); count++; } catch {}
+  }
+  state.icalPending = null;
+  if (statusEl) {
+    statusEl.textContent = `✓ ${count} Termin${count === 1 ? '' : 'e'} importiert`;
+    setTimeout(() => statusEl.classList.add('hidden'), 4000);
+  }
+}
+
+function cancelIcalImport() {
+  state.icalPending = null;
+  closeSheet('sheet-ical-import');
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3516,6 +3615,7 @@ const App = {
   saveBundesland,
   // Pt 9: iCal
   importICSFromInput,
+  toggleIcalMember, toggleIcalAllMembers, confirmIcalImport, cancelIcalImport,
   // Pt 19: member photo
   handleMemberPhotoInput, removeMemberPhoto,
   // Pt 26: PIN
