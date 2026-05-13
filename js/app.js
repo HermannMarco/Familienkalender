@@ -46,6 +46,7 @@ const state = {
   unsubFamily: null,
   unsubEvents: null,
   personFilter: null,
+  personFilterTouched: false,
   searchActive: false,
   searchQuery: '',
   holidays: {},
@@ -248,6 +249,17 @@ function expandEvent(event, rangeStart, rangeEnd) {
   return instances;
 }
 
+// Idee 3: nächstes Datum einer Recurring-Kette nach event.date — null wenn Kette zu Ende.
+// Nutzt expandEvent als Single Source of Truth für daysOfWeek/endDate/count/exceptions.
+function nextRecurringDate(ev) {
+  if (!ev.recurring || ev.recurring.type === 'none') return null;
+  const startDate = parseDate(ev.date);
+  const rangeStart = addDays(startDate, 1);
+  const rangeEnd = new Date(startDate.getFullYear() + 10, 11, 31);
+  const instances = expandEvent(ev, rangeStart, rangeEnd);
+  return instances.length > 0 ? instances[0].date : null;
+}
+
 function getEventsForRange(startDate, endDate) {
   const result = [];
   for (const ev of state.events) {
@@ -288,6 +300,10 @@ function subscribeFamily(familyId) {
     .onSnapshot(doc => {
       if (doc.exists) {
         state.family = { id: doc.id, ...doc.data() };
+        if (!state.personFilterTouched && state.family.uidToMember && state.uid) {
+          const myId = state.family.uidToMember[state.uid];
+          if (myId) state.personFilter = myId;
+        }
         renderAll();
         const land = state.family.bundesland;
         if (land) {
@@ -940,6 +956,7 @@ function renderPersonFilter() {
 
 function setPersonFilter(id) {
   state.personFilter = id || null;
+  state.personFilterTouched = true;
   renderPersonFilter();
   renderCalendar();
   renderTodos();
@@ -1394,6 +1411,7 @@ function renderTodos() {
     // Pt 14: show endDate in todo card
     let meta = '';
     if (ev.date) meta += formatDisplayShort(ev.date);
+    if (ev.startTime) meta += (meta ? ' · ' : '') + ev.startTime + (ev.endTime ? '–' + ev.endTime : '');
     if (ev.endDate) meta += (meta ? ' · ' : '') + `Bis: ${formatDisplayShort(ev.endDate)}`;
 
     // Idee 1: Privat-Anzeige
@@ -1916,9 +1934,9 @@ function applyEventTypeUI(type) {
   if (titleInput) {
     titleInput.placeholder = isBirthday ? 'Name der Person' : (isTodo ? 'Aufgabe' : 'Titel');
   }
-  document.getElementById('time-group').classList.toggle('hidden', isBirthday || isTodo);
+  document.getElementById('time-group').classList.toggle('hidden', isBirthday);
   document.getElementById('location-group').classList.toggle('hidden', isBirthday || isTodo);
-  document.getElementById('recurring-group').classList.toggle('hidden', isTodo);
+  document.getElementById('recurring-group').classList.toggle('hidden', isBirthday);
   document.getElementById('event-type-group').classList.toggle('hidden', !!state.editingEventId);
 
   // Pt 10.2: hide endDate for birthdays; preserve value across type switches
@@ -2083,7 +2101,7 @@ async function saveEvent() {
   const desc     = document.getElementById('event-description').value.trim() || null;
   const memberIds= getSelectedMemberIds();
 
-  const recType = (currentEventType === 'termin' || currentEventType === 'geburtstag')
+  const recType = (currentEventType !== 'geburtstag')
     ? document.getElementById('event-recurring').value : 'none';
   let recurring = null;
   if (recType !== 'none') {
@@ -2332,6 +2350,14 @@ function deleteCurrentEvent() {
   }
 
   if (ev.recurring && ev.recurring.type !== 'none') {
+    // Idee 3: Wiederkehrende Todos haben keinen one/following/all-Scope —
+    // Löschen beendet die Kette komplett. Termine zeigen weiterhin das Sheet.
+    if (ev.type === 'todo') {
+      if (confirm(`Wiederkehrendes Todo "${displayTitle(ev)}" komplett löschen?`)) {
+        commitWrite(dbDeleteEvent(detailEventId)).then(() => closeSheet('sheet-event-detail'));
+      }
+      return;
+    }
     state.editingEventData = { id: detailEventId, date: detailEventDate };
     state.recurringAction = 'delete';
     document.getElementById('recurring-action-title').textContent = 'Serientermin löschen';
@@ -2386,22 +2412,86 @@ async function applyRecurringAction(scope) {
   state.editingEventData = null;
 }
 
+// Idee 3: Recurring-Todo erledigen — Original wandert, erledigte Instanz als Standalone-Doc.
+async function advanceRecurringTodo(ev) {
+  const nextDate = nextRecurringDate(ev);
+
+  if (!nextDate) {
+    // Letzte Instanz der Kette — nur completed markieren, kein Doc-Splitting.
+    return commitWrite(db.collection('families').doc(state.familyId).collection('events')
+      .doc(ev.id).update({
+        completed: true,
+        completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      }));
+  }
+
+  // 1) Standalone-Erledigt-Doc anlegen (Kopie ohne Recurring-Bindung)
+  const { id: _id, ...rest } = ev;
+  const completedDoc = {
+    ...rest,
+    date: ev.date,
+    recurring: { type: 'none' },
+    completed: true,
+    completedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  };
+  // exceptions des Originals nicht mit kopieren — gehören zur Kette, nicht zur Einzelinstanz
+  delete completedDoc.recurring.exceptions;
+
+  // 2) Original-Doc auf die nächste Instanz weiterschieben
+  const update = { date: nextDate };
+  if (ev.endDate) {
+    const oldStart = parseDate(ev.date);
+    const oldEnd = parseDate(ev.endDate);
+    const diffDays = Math.round((oldEnd - oldStart) / 86400000);
+    update.endDate = fmt(addDays(parseDate(nextDate), diffDays));
+  }
+  if (ev.recurring && ev.recurring.count != null) {
+    update['recurring.count'] = Math.max(0, ev.recurring.count - 1);
+  }
+
+  await commitWrite(dbSaveEvent(completedDoc));
+  await commitWrite(db.collection('families').doc(state.familyId).collection('events')
+    .doc(ev.id).update(update));
+}
+
 async function toggleTodo(id, e) {
   if (e) e.stopPropagation();
   const ev = state.events.find(e2 => e2.id === id);
   if (!ev) return;
   // Idee 1: fremd-private Todos darf niemand außer dem Ersteller togglen
   if (!canEditEvent(ev)) return;
+
+  const isRecurringActive = ev.type === 'todo' && !ev.completed
+    && ev.recurring && ev.recurring.type !== 'none';
+  if (isRecurringActive) {
+    return advanceRecurringTodo(ev);
+  }
+
+  const update = ev.completed
+    ? { completed: false, completedAt: firebase.firestore.FieldValue.delete() }
+    : { completed: true,  completedAt: firebase.firestore.FieldValue.serverTimestamp() };
   await commitWrite(db.collection('families').doc(state.familyId).collection('events')
-    .doc(id).update({ completed: !ev.completed }));
+    .doc(id).update(update));
 }
 
 async function toggleTodoFromDetail(id) {
   const ev = state.events.find(e => e.id === id);
   if (!ev) return;
   if (!canEditEvent(ev)) return;
+
+  const isRecurringActive = ev.type === 'todo' && !ev.completed
+    && ev.recurring && ev.recurring.type !== 'none';
+  if (isRecurringActive) {
+    await advanceRecurringTodo(ev);
+    closeSheet('sheet-event-detail');
+    return;
+  }
+
+  const update = ev.completed
+    ? { completed: false, completedAt: firebase.firestore.FieldValue.delete() }
+    : { completed: true,  completedAt: firebase.firestore.FieldValue.serverTimestamp() };
   await commitWrite(db.collection('families').doc(state.familyId).collection('events')
-    .doc(id).update({ completed: !ev.completed }));
+    .doc(id).update(update));
   closeSheet('sheet-event-detail');
 }
 
