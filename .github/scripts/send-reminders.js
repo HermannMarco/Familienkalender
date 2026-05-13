@@ -20,6 +20,7 @@ const WINDOW_MIN = 7;                // Fenster: now - 7min .. now (5min Cadence
 const FIRED_TTL_MS = 24 * 3600_000;  // dedup-Einträge nach 24h löschen
 const FUTURE_HORIZON_MS = 30 * 86400_000; // Instanzen-Expansion nur bis 30 Tage in die Zukunft
 const MAX_ITER = 10000;              // safety cap pro Recurring-Event
+const TODO_CLEANUP_DAYS = 90;        // Erledigte Todos nach 90 Tagen automatisch löschen
 
 // ── Init ─────────────────────────────────────────────────────
 const sa = JSON.parse(process.env.FIREBASE_SA_JSON);
@@ -184,14 +185,35 @@ function formatTitle(ev) {
   // Subscription-Cleanups gesammelt: { familyId: Set<uid> }
   const subCleanup = new Map();
 
+  let cleanupTotal = 0;
+  const cleanupCutoffMs = now - TODO_CLEANUP_DAYS * 86400_000;
+  const cleanupCutoffISO = toISO(new Date(cleanupCutoffMs));
+
   for (const famDoc of families.docs) {
     const family = famDoc.data();
     const familyId = famDoc.id;
     const subs = family.pushSubscriptions || {};
+    const todosToDelete = [];
 
     const eventsSnap = await famDoc.ref.collection('events').get();
     for (const evDoc of eventsSnap.docs) {
       const ev = { id: evDoc.id, ...evDoc.data() };
+
+      // Idee 4: Erledigte Todos nach 90 Tagen aufräumen — completedAt primär,
+      // date als Fallback für Bestand ohne neuen Timestamp.
+      if (ev.type === 'todo' && ev.completed === true) {
+        const completedAtMs = ev.completedAt && typeof ev.completedAt.toMillis === 'function'
+          ? ev.completedAt.toMillis()
+          : null;
+        const expired = completedAtMs != null
+          ? completedAtMs < cleanupCutoffMs
+          : (typeof ev.date === 'string' && ev.date < cleanupCutoffISO);
+        if (expired) {
+          todosToDelete.push(ev.id);
+          continue; // erledigte Todos haben eh keine Reminder mehr
+        }
+      }
+
       if (!Array.isArray(ev.reminders) || !ev.reminders.length) continue;
       processedEvents++;
 
@@ -244,6 +266,18 @@ function formatTitle(ev) {
         }
       }
     }
+
+    if (todosToDelete.length) {
+      const batch = db.batch();
+      todosToDelete.forEach(id => batch.delete(famDoc.ref.collection('events').doc(id)));
+      try {
+        await batch.commit();
+        cleanupTotal += todosToDelete.length;
+        console.log(`Cleanup: deleted ${todosToDelete.length} completed todos in family=${familyId}`);
+      } catch (e) {
+        console.error(`Cleanup failed for family=${familyId}: ${e.message}`);
+      }
+    }
   }
 
   // Abgelaufene Subscriptions aufräumen
@@ -279,6 +313,7 @@ function formatTitle(ev) {
     trimmedDedup: trimmed,
     eventsProcessed: processedEvents,
     families: families.size,
+    todosCleanedUp: cleanupTotal,
   }));
 })().catch(err => {
   console.error('Fatal:', err);
