@@ -864,6 +864,26 @@
 </div>
 
 <!-- ══════════════════════════════════════════
+     BOTTOM SHEET: ICAL IMPORT — Personen-Auswahl
+══════════════════════════════════════════ -->
+<div id="sheet-ical-import" class="bottom-sheet hidden">
+  <div class="sheet-handle"></div>
+  <div class="sheet-header">
+    <button class="btn-text" onclick="App.cancelIcalImport()">Abbrechen</button>
+    <h3>Termine zuordnen</h3>
+    <button class="btn-primary-text" onclick="App.confirmIcalImport()">Importieren</button>
+  </div>
+  <div class="sheet-body">
+    <p class="settings-hint" id="ical-import-info"></p>
+    <div class="form-group">
+      <label class="form-label">Wer wird zugeordnet?</label>
+      <div id="ical-members-selector"></div>
+    </div>
+    <div class="sheet-spacer"></div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      FIREBASE & APP SCRIPTS
 ══════════════════════════════════════════ -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
