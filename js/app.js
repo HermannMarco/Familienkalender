@@ -409,6 +409,44 @@ async function dbRemovePushSubscription(uid) {
   });
 }
 
+// Letzter-Login pro Gerät. Throttle via localStorage, damit nicht jeder schnelle
+// App-Reopen einen Firestore-Write auslöst.
+async function recordLastSeen() {
+  if (!state.uid || !state.familyId) return;
+  const last = parseInt(localStorage.getItem('lastSeenWrittenAt') || '0', 10);
+  if (Date.now() - last < 5 * 60 * 1000) return;
+  try {
+    await commitWrite(dbUpdateFamily({
+      [`lastSeen.${state.uid}`]: firebase.firestore.FieldValue.serverTimestamp()
+    }));
+    localStorage.setItem('lastSeenWrittenAt', String(Date.now()));
+  } catch (e) {
+    console.warn('lastSeen write failed', e);
+  }
+}
+
+function formatLastSeen(ts) {
+  if (!ts) return '—';
+  const d = (typeof ts.toDate === 'function') ? ts.toDate() : new Date(ts);
+  if (isNaN(d.getTime())) return '—';
+  const diffMs = Date.now() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return 'gerade eben';
+  if (diffMin < 60) return `vor ${diffMin} Min.`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `vor ${diffH} Std.`;
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const todayMid = new Date(); todayMid.setHours(0, 0, 0, 0);
+  const dMid = new Date(d); dMid.setHours(0, 0, 0, 0);
+  const dayDiff = Math.round((todayMid - dMid) / 86400000);
+  if (dayDiff === 1) return `gestern ${hh}:${mm}`;
+  if (dayDiff < 7) return `vor ${dayDiff} Tagen`;
+  const day = String(d.getDate()).padStart(2, '0');
+  const mon = String(d.getMonth() + 1).padStart(2, '0');
+  return `${day}.${mon}.${d.getFullYear()} ${hh}:${mm}`;
+}
+
 // Bug 1+1b: Firestore-Schreibvorgänge resolven offline NICHT — die Daten landen
 // zwar lokal im IndexedDB-Cache (und der lokale Listener feuert sofort), aber das
 // Promise wartet bis zur Server-Bestätigung. Beim Speichern eines Termins offline
@@ -1668,6 +1706,7 @@ function openAddMember() {
   selectedColor = MEMBER_COLORS[0];
   renderColorPicker();
   updateMemberPhotoPreview(null);
+  document.getElementById('member-lastseen-group')?.classList.add('hidden');
   hideError('member-form-error');
   openSheet('sheet-member');
 }
@@ -1682,8 +1721,44 @@ function openEditMember(id) {
   selectedColor = m.color;
   renderColorPicker();
   updateMemberPhotoPreview(m.photo || null);
+  renderMemberLastSeen(id);
   hideError('member-form-error');
   openSheet('sheet-member');
+}
+
+function renderMemberLastSeen(memberId) {
+  const group = document.getElementById('member-lastseen-group');
+  const list  = document.getElementById('member-lastseen-list');
+  if (!group || !list) return;
+  group.classList.remove('hidden');
+
+  const map      = state.family?.uidToMember || {};
+  const lastSeen = state.family?.lastSeen    || {};
+  const uids = Object.keys(map).filter(uid => map[uid] === memberId);
+
+  if (uids.length === 0) {
+    list.innerHTML = `<div style="color:var(--text-muted);font-size:.9rem">Kein Gerät verknüpft</div>`;
+    return;
+  }
+
+  // Neueste zuerst (UIDs ohne lastSeen ans Ende)
+  uids.sort((a, b) => {
+    const ta = lastSeen[a]?.toMillis ? lastSeen[a].toMillis() : 0;
+    const tb = lastSeen[b]?.toMillis ? lastSeen[b].toMillis() : 0;
+    return tb - ta;
+  });
+
+  list.innerHTML = uids.map(uid => {
+    const isMe   = (uid === state.uid);
+    const when   = formatLastSeen(lastSeen[uid]);
+    const meTag  = isMe ? ' · <span style="color:var(--accent)">Dieses Gerät</span>' : '';
+    return `
+      <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:.95rem">${when}</div>
+        <div style="font-size:.8rem;color:var(--text-muted);font-family:monospace">${uid.slice(0,8)}…${meTag}</div>
+      </div>
+    `;
+  }).join('');
 }
 
 function renderColorPicker() {
@@ -3016,6 +3091,7 @@ async function removeDevice(uidToRemove) {
       allowedUids: firebase.firestore.FieldValue.arrayRemove(uidToRemove),
     };
     update[`uidToMember.${uidToRemove}`] = firebase.firestore.FieldValue.delete();
+    update[`lastSeen.${uidToRemove}`] = firebase.firestore.FieldValue.delete();
     await commitWrite(db.collection('families').doc(state.familyId).update(update));
   } catch (e) {
     alert('Fehler beim Entfernen: ' + (e.message || 'unbekannt'));
@@ -3331,6 +3407,7 @@ function startApp(familyId) {
   showEl('screen-app');
   subscribeFamily(familyId);
   subscribeEvents(familyId);
+  recordLastSeen();
   renderHeaderTitle();
   renderCalendar();
 }
