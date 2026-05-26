@@ -1294,67 +1294,38 @@ function renderDayView() {
   // Pt 13: exclude todos
   const events = getEventsForDay(ds).filter(e => e.type !== 'todo').filter(matchesPersonFilter);
   // Pt 2.2 / 1 Bug fix: only valid HH:MM startTime
-  const timed  = events.filter(e => e.startTime && e.startTime.length === 5);
+  const timed  = events.filter(e => e.startTime && e.startTime.length === 5)
+                       .sort((a, b) => a.startTime.localeCompare(b.startTime));
   const allDay = events.filter(e => !e.startTime);
-  const H = 48;
-
-  const alldayEl = document.getElementById('day-allday');
-  // Pt 7: add holidays to all-day area
   const holName = getHolidayName(ds);
-  const holChip = holName ? `<div class="cell-event-chip holiday-chip">${holName}</div>` : '';
-  alldayEl.innerHTML = holChip + (allDay.length > 0
-    ? allDay.map(ev => {
-        const bg = getEventBg(ev);
-        // Idee 1: Privat-Anzeige
-        const hidden = isPrivateForOthers(ev);
-        const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
-        const titleHtml = hidden ? '🔒 Privat' : `${ev.type==='geburtstag'?'🎁 ':''}${ownPriv}${ev.title}`;
-        return `<div class="cell-event-chip" style="background:${bg};margin:2px;font-size:.8rem;cursor:pointer" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${titleHtml}</div>`;
-      }).join('')
-    : '');
 
-  let timesHtml = '';
-  let colHtml   = '';
-  for (let h = 0; h < 24; h++) {
-    timesHtml += `<div class="wg-time-label">${h > 0 ? h+':00' : ''}</div>`;
-    // Pt 8: click slot to create event
-    colHtml += `<div class="wg-hour" onclick="App.openAddEvent('termin','${ds}','${String(h).padStart(2,'0')}:00')"></div>`;
+  let html = '';
+
+  // Sektion 1: Ganztags (Feiertag + ganztägige Events)
+  if (holName || allDay.length > 0) {
+    html += `<div class="day-section-label">Ganztags</div>`;
+    if (holName) {
+      html += `<div class="day-holiday-card">🎉 ${holName}</div>`;
+    }
+    html += allDay.map(ev => renderEventCard(ev)).join('');
   }
 
-  for (const ev of timed) {
-    const [sh, sm] = ev.startTime.split(':').map(Number);
-    const [eh, em] = (ev.endTime || `${String(sh+1).padStart(2,'0')}:00`).split(':').map(Number);
-    const top    = sh * H + sm / 60 * H;
-    const height = Math.max(22, (eh-sh)*H + (em-sm)/60*H);
-    const bg     = getEventBg(ev);
-    // Idee 1: Privat-Anzeige
-    const hidden = isPrivateForOthers(ev);
-    const descDisp = displayDescription(ev);
-    const noteHtml = descDisp ? `<span class="eb-note">${descDisp}</span>` : '';
-    const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
-    const titleHtml = hidden ? '🔒 Privat' : `${ev.type==='geburtstag'?'🎁 ':''}${ownPriv}${ev.title}`;
-    colHtml += `<div class="event-block" style="background:${bg};top:${top}px;height:${height}px" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">
-      <span>${titleHtml}</span>
-      <span class="eb-time">${ev.startTime}${ev.endTime?'–'+ev.endTime:''}</span>
-      ${noteHtml}
-    </div>`;
+  // Sektion 2: Mit Uhrzeit
+  if (timed.length > 0) {
+    html += `<div class="day-section-label">Mit Uhrzeit</div>`;
+    html += timed.map(ev => renderEventCard(ev)).join('');
   }
 
-  // Pt 2.1/2.2 Bug fix: now-line outside column
-  let nowLineHtml = '';
-  const nowD = new Date();
-  if (fmt(nowD) === ds) {
-    const nowTop = nowD.getHours() * H + nowD.getMinutes() / 60 * H;
-    nowLineHtml = `<div class="week-now-line" style="top:${nowTop}px"><div class="now-dot"></div></div>`;
+  // Empty state
+  if (!holName && allDay.length === 0 && timed.length === 0) {
+    html = `<p style="text-align:center;color:var(--text-2);margin-top:32px;font-size:.95rem">Keine Termine an diesem Tag</p>`;
   }
 
-  setHTML('day-grid',
-    `<div class="wg-wrap"><div class="wg-times">${timesHtml}</div><div class="wg-days" style="position:relative"><div class="wg-day">${colHtml}</div>${nowLineHtml}</div></div>`);
+  setHTML('day-list', html);
+}
 
-  setTimeout(() => {
-    const wrap = document.querySelector('#view-tag .time-scroll-wrap');
-    if (wrap) wrap.scrollTop = 8 * H;
-  }, 150);
+function openAddEventForCurrentDay() {
+  openAddEvent('termin', fmt(state.currentDate));
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3669,7 +3640,7 @@ const App = {
   setView, setTab,
   navigatePrev, navigateNext, goToToday, goToDay,
   selectDay, closeDayPanel,
-  openAddEvent, openEditEvent, saveEvent,
+  openAddEvent, openAddEventForCurrentDay, openEditEvent, saveEvent,
   openEventDetail, editCurrentEvent, deleteCurrentEvent,
   applyRecurringAction,
   toggleTodo, toggleTodoFromDetail,
