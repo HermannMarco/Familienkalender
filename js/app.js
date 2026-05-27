@@ -115,6 +115,21 @@ function addDays(d, n) {
   return r;
 }
 
+function relativeDayLabel(d) {
+  const t = new Date(); t.setHours(0,0,0,0);
+  const target = new Date(d); target.setHours(0,0,0,0);
+  const diff = Math.round((target - t) / 86400000);
+  switch (diff) {
+    case -2: return 'Vorgestern';
+    case -1: return 'Gestern';
+    case 0:  return 'Heute';
+    case 1:  return 'Morgen';
+    case 2:  return 'Übermorgen';
+    case 3:  return 'In 3 Tagen';
+    default: return null;
+  }
+}
+
 function startOfWeek(d) {
   const day = d.getDay();
   const diff = (day + 6) % 7;
@@ -945,6 +960,7 @@ async function savePinManage() {
 function renderHeaderTitle() {
   const d = state.currentDate;
   let title = '';
+  let badge = '';
   if (state.currentView === 'monat') {
     title = `${DE_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
   } else if (state.currentView === 'woche') {
@@ -957,9 +973,11 @@ function renderHeaderTitle() {
     }
   } else {
     title = `${d.getDate()}. ${DE_MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+    const rel = relativeDayLabel(d);
+    if (rel) badge = ` <span class="header-today-badge">${rel}</span>`;
   }
   const el = document.getElementById('header-title');
-  if (el) el.textContent = title;
+  if (el) el.innerHTML = title + badge;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1303,7 +1321,8 @@ function renderDayView() {
 
   // Sektion 1: Ganztags (Feiertag + ganztägige Events)
   if (holName || allDay.length > 0) {
-    html += `<div class="day-section-label">Ganztags</div>`;
+    const allDayCount = (holName ? 1 : 0) + allDay.length;
+    html += `<div class="day-section-label">Ganztags <span class="day-section-count">· ${allDayCount}</span></div>`;
     if (holName) {
       html += `<div class="day-holiday-card">🎉 ${holName}</div>`;
     }
@@ -1312,7 +1331,7 @@ function renderDayView() {
 
   // Sektion 2: Mit Uhrzeit
   if (timed.length > 0) {
-    html += `<div class="day-section-label">Mit Uhrzeit</div>`;
+    html += `<div class="day-section-label">Mit Uhrzeit <span class="day-section-count">· ${timed.length}</span></div>`;
     html += timed.map(ev => renderEventCard(ev)).join('');
   }
 
