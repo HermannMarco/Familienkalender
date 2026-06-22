@@ -172,7 +172,13 @@ function formatTitle(ev) {
 
   const metaRef = db.doc('_meta/scheduler');
   const metaSnap = await metaRef.get();
-  const fired = (metaSnap.exists && metaSnap.data().firedReminders) || {};
+  const metaData = metaSnap.exists ? metaSnap.data() : {};
+  const fired = metaData.firedReminders || {};
+
+  // Voll-Scan höchstens 1×/Tag: pflegt das hasReminders-Flag (Backfill + Pruning) und
+  // erledigt das 90-Tage-Todo-Cleanup. Alle anderen Läufe lesen nur geflaggte Events.
+  const todayISO = toISO(new Date(now));
+  const doFullScan = (metaData.lastFullScanISO || null) !== todayISO;
 
   const families = await db.collection('families').get();
   let pushCount = 0;
@@ -195,22 +201,47 @@ function formatTitle(ev) {
     const subs = family.pushSubscriptions || {};
     const todosToDelete = [];
 
-    const eventsSnap = await famDoc.ref.collection('events').get();
+    // Schmale Lesung im Normalfall (nur Events mit Reminder), Voll-Lesung nur beim Tages-Scan.
+    const eventsSnap = doFullScan
+      ? await famDoc.ref.collection('events').get()
+      : await famDoc.ref.collection('events').where('hasReminders', '==', true).get();
+
+    const flagBatch = doFullScan ? db.batch() : null;
+    let flagWrites = 0;
+
     for (const evDoc of eventsSnap.docs) {
       const ev = { id: evDoc.id, ...evDoc.data() };
 
-      // Idee 4: Erledigte Todos nach 90 Tagen aufräumen — completedAt primär,
-      // date als Fallback für Bestand ohne neuen Timestamp.
-      if (ev.type === 'todo' && ev.completed === true) {
-        const completedAtMs = ev.completedAt && typeof ev.completedAt.toMillis === 'function'
-          ? ev.completedAt.toMillis()
-          : null;
-        const expired = completedAtMs != null
-          ? completedAtMs < cleanupCutoffMs
-          : (typeof ev.date === 'string' && ev.date < cleanupCutoffISO);
-        if (expired) {
-          todosToDelete.push(ev.id);
-          continue; // erledigte Todos haben eh keine Reminder mehr
+      if (doFullScan) {
+        // Idee 4: Erledigte Todos nach 90 Tagen aufräumen — completedAt primär,
+        // date als Fallback für Bestand ohne neuen Timestamp. (Vor Flag-Pflege, da
+        // zu löschende Docs kein Flag-Update brauchen.)
+        if (ev.type === 'todo' && ev.completed === true) {
+          const completedAtMs = ev.completedAt && typeof ev.completedAt.toMillis === 'function'
+            ? ev.completedAt.toMillis()
+            : null;
+          const expired = completedAtMs != null
+            ? completedAtMs < cleanupCutoffMs
+            : (typeof ev.date === 'string' && ev.date < cleanupCutoffISO);
+          if (expired) {
+            todosToDelete.push(ev.id);
+            continue; // erledigte Todos haben eh keine Reminder mehr
+          }
+        }
+
+        // hasReminders-Flag pflegen: true nur für Events, die noch einen Reminder feuern
+        // können (Reminder vorhanden, nicht erledigt, und wiederkehrend ODER nicht vergangen).
+        // Backfillt Altbestand und pruned vergangene Einzeltermine, damit die schmale Query klein bleibt.
+        const remindersNonEmpty = Array.isArray(ev.reminders) && ev.reminders.length > 0;
+        const isRecurring = ev.recurring && ev.recurring.type && ev.recurring.type !== 'none';
+        const shouldFlag = remindersNonEmpty && ev.completed !== true
+          && (isRecurring || (typeof ev.date === 'string' && ev.date >= todayISO));
+        // Nur schreiben, wenn ein Doc in die "true"-Menge rein- oder rausmuss. Docs ohne Flag
+        // (Altbestand ohne Reminder) bleiben unangetastet — die schmale Query matcht eh nur == true.
+        const needFlagWrite = shouldFlag ? (ev.hasReminders !== true) : (ev.hasReminders === true);
+        if (needFlagWrite) {
+          flagBatch.update(evDoc.ref, { hasReminders: shouldFlag });
+          flagWrites++;
         }
       }
 
@@ -267,6 +298,16 @@ function formatTitle(ev) {
       }
     }
 
+    // Flag-Backfill/Pruning committen (nur Voll-Scan)
+    if (flagBatch && flagWrites) {
+      try {
+        await flagBatch.commit();
+        console.log(`Flag-Backfill: ${flagWrites} hasReminders-Update(s) in family=${familyId}`);
+      } catch (e) {
+        console.error(`Flag-Backfill failed for family=${familyId}: ${e.message}`);
+      }
+    }
+
     if (todosToDelete.length) {
       const batch = db.batch();
       todosToDelete.forEach(id => batch.delete(famDoc.ref.collection('events').doc(id)));
@@ -304,9 +345,11 @@ function formatTitle(ev) {
   await metaRef.set({
     firedReminders: newFired,
     lastRunAt: admin.firestore.Timestamp.fromMillis(now),
+    ...(doFullScan ? { lastFullScanISO: todayISO } : {}),
   }, { merge: true });
 
   console.log(JSON.stringify({
+    fullScan: doFullScan,
     pushed: pushCount,
     errors: errCount,
     dedupSkipped: skippedDedup,
