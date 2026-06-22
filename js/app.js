@@ -391,11 +391,14 @@ async function dbJoinFamily(code) {
 
 async function dbSaveEvent(data) {
   const col = db.collection('families').doc(state.familyId).collection('events');
+  // hasReminders-Flag: erlaubt dem Server-Reminder-Skript, nur relevante Events zu lesen
+  // (statt der kompletten Collection) → spart Firestore-Lesekontingent.
+  const hasReminders = Array.isArray(data.reminders) && data.reminders.length > 0;
   if (data.id) {
     const { id, ...rest } = data;
-    await col.doc(id).set({ ...rest, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await col.doc(id).set({ ...rest, hasReminders, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
   } else {
-    await col.add({ ...data, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    await col.add({ ...data, hasReminders, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
   }
 }
 
