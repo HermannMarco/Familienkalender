@@ -1156,6 +1156,42 @@ function renderDayPanel(dateStr) {
 //  RENDER: WEEK VIEW
 // ════════════════════════════════════════════════════════════════
 
+// Überlappungs-Layout für die Wochenansicht: weist jedem timed-Event eines Tages
+// eine Lane (_lane) und die Lane-Anzahl seines Überlappungs-Clusters (_laneCount) zu.
+// Gleichmäßige Aufteilung: bei N gleichzeitigen Terminen je 1/N Breite, nebeneinander.
+function layoutWeekDayEvents(dayEvents) {
+  const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  // Start-/Endminuten (Default-Dauer 60 Min, mind. 15 Min für Überlappungs-Erkennung)
+  const items = dayEvents.map(ev => {
+    const start = toMin(ev.startTime);
+    const end   = ev.endTime ? Math.max(toMin(ev.endTime), start + 15) : start + 60;
+    return { ev, start, end };
+  }).sort((a, b) => a.start - b.start || a.end - b.end);
+
+  // In Cluster zusammenhängend überlappender Termine gruppieren
+  let cluster = [];
+  let clusterEnd = -1;
+  const flush = () => {
+    // Greedy-Coloring: erste Lane, deren letzter Termin schon beendet ist
+    const laneEnds = [];
+    for (const it of cluster) {
+      let lane = laneEnds.findIndex(end => it.start >= end);
+      if (lane === -1) { lane = laneEnds.length; laneEnds.push(it.end); }
+      else laneEnds[lane] = it.end;
+      it.ev._lane = lane;
+    }
+    for (const it of cluster) it.ev._laneCount = laneEnds.length;
+    cluster = [];
+    clusterEnd = -1;
+  };
+  for (const it of items) {
+    if (cluster.length && it.start >= clusterEnd) flush();
+    cluster.push(it);
+    clusterEnd = Math.max(clusterEnd, it.end);
+  }
+  if (cluster.length) flush();
+}
+
 function renderWeekView() {
   const mon = startOfWeek(state.currentDate);
   const todayStr = today();
@@ -1267,19 +1303,28 @@ function renderWeekView() {
       colHtml += `<div class="wg-hour" onclick="App.openAddEvent('termin','${ds}','${String(h).padStart(2,'0')}:00')"></div>`;
     }
 
+    // Überlappende Termine nebeneinander legen (_lane / _laneCount setzen)
+    layoutWeekDayEvents(dayEvents);
+
     for (const ev of dayEvents) {
       const [sh, sm] = ev.startTime.split(':').map(Number);
       const [eh, em] = (ev.endTime || `${String(sh+1).padStart(2,'0')}:00`).split(':').map(Number);
       const top    = sh * H + sm / 60 * H;
       const height = Math.max(22, (eh-sh)*H + (em-sm)/60*H);
       const bg     = getEventBg(ev);
+      // Gleichmäßige Lane-Aufteilung bei Überlappung (volle Breite wenn allein)
+      const laneCount = ev._laneCount || 1;
+      const lane      = ev._lane || 0;
+      const laneStyle = laneCount > 1
+        ? `left:calc(${lane * 100 / laneCount}% + 2px);width:calc(${100 / laneCount}% - 4px);right:auto;`
+        : '';
       // Idee 1: Privat-Anzeige
       const hidden = isPrivateForOthers(ev);
       const descDisp = displayDescription(ev);
       const noteHtml = descDisp ? `<span class="eb-note">${descDisp}</span>` : '';
       const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
       const titleHtml = hidden ? '🔒 Privat' : `${ev.type==='geburtstag'?'🎁 ':''}${ownPriv}${ev.title}`;
-      colHtml += `<div class="event-block" style="background:${bg};top:${top}px;height:${height}px" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">
+      colHtml += `<div class="event-block" style="background:${bg};top:${top}px;height:${height}px;${laneStyle}" onclick="event.stopPropagation();App.openEventDetail('${ev.id}','${ev.date}')">
         <span>${titleHtml}</span>
         <span class="eb-time">${ev.startTime}${ev.endTime?'–'+ev.endTime:''}</span>
         ${noteHtml}
