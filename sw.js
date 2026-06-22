@@ -1,4 +1,4 @@
-const CACHE = 'familienkalender-v28';
+const CACHE = 'familienkalender-v29';
 const ASSETS = [
   './',
   './index.html',
