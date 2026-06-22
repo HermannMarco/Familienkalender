@@ -1312,13 +1312,16 @@ function renderWeekView() {
 
 function renderDayView() {
   const ds     = fmt(state.currentDate);
-  // Pt 13: exclude todos
-  const events = getEventsForDay(ds).filter(e => e.type !== 'todo').filter(matchesPersonFilter);
+  const dayItems = getEventsForDay(ds).filter(matchesPersonFilter);
+  // Pt 13: Termine (ohne Todos)
+  const events = dayItems.filter(e => e.type !== 'todo');
   // Pt 2.2 / 1 Bug fix: only valid HH:MM startTime
   const timed  = events.filter(e => e.startTime && e.startTime.length === 5)
                        .sort((a, b) => a.startTime.localeCompare(b.startTime));
   const allDay = events.filter(e => !e.startTime);
   const holName = getHolidayName(ds);
+  // Sektion 3: offene Todos, die auf diesen Tag fallen
+  const todos = dayItems.filter(e => e.type === 'todo' && !e.completed);
 
   let html = '';
 
@@ -1338,8 +1341,14 @@ function renderDayView() {
     html += timed.map(ev => renderEventCard(ev)).join('');
   }
 
+  // Sektion 3: Todos
+  if (todos.length > 0) {
+    html += `<div class="day-section-label">Todos <span class="day-section-count">· ${todos.length}</span></div>`;
+    html += todos.map(ev => renderTodoCard(ev, false)).join('');
+  }
+
   // Empty state
-  if (!holName && allDay.length === 0 && timed.length === 0) {
+  if (!holName && allDay.length === 0 && timed.length === 0 && todos.length === 0) {
     html = `<p style="text-align:center;color:var(--text-2);margin-top:32px;font-size:.95rem">Keine Termine an diesem Tag</p>`;
   }
 
@@ -1431,36 +1440,39 @@ function renderTodos() {
     return;
   }
 
-  setHTML('todo-list', todos.map(ev => {
-    const bg = getEventBg(ev);
-    const members = (ev.memberIds || []).filter(id => id !== 'all');
-    const memberChips = members.map(id => {
-      const m = getMember(id);
-      return m ? `<span class="member-chip" style="background:${m.color}">${getMemberAvatar(m,'sm')}<span style="margin-left:3px">${m.name}</span></span>` : '';
-    }).join('');
+  setHTML('todo-list', todos.map(ev => renderTodoCard(ev)).join(''));
+}
 
-    // Pt 14: show endDate in todo card
-    let meta = '';
-    if (ev.date) meta += formatDisplayShort(ev.date);
-    if (ev.startTime) meta += (meta ? ' · ' : '') + ev.startTime + (ev.endTime ? '–' + ev.endTime : '');
-    if (ev.endDate) meta += (meta ? ' · ' : '') + `Bis: ${formatDisplayShort(ev.endDate)}`;
+// Todo-Karte (mit Erledigt-Häkchen) — genutzt von renderTodos und renderDayView.
+// showDate=false in der Tagesansicht, wo das Datum redundant ist.
+function renderTodoCard(ev, showDate = true) {
+  const members = (ev.memberIds || []).filter(id => id !== 'all');
+  const memberChips = members.map(id => {
+    const m = getMember(id);
+    return m ? `<span class="member-chip" style="background:${m.color}">${getMemberAvatar(m,'sm')}<span style="margin-left:3px">${m.name}</span></span>` : '';
+  }).join('');
 
-    // Idee 1: Privat-Anzeige
-    const hidden = isPrivateForOthers(ev);
-    const ownPrivIcon = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
-    const titleHtml = hidden ? '🔒 Privat' : (ownPrivIcon + ev.title);
+  // Pt 14: show endDate in todo card
+  let meta = '';
+  if (showDate && ev.date) meta += formatDisplayShort(ev.date);
+  if (ev.startTime) meta += (meta ? ' · ' : '') + ev.startTime + (ev.endTime ? '–' + ev.endTime : '');
+  if (ev.endDate) meta += (meta ? ' · ' : '') + `Bis: ${formatDisplayShort(ev.endDate)}`;
 
-    return `<div class="event-card${ev.completed ? ' completed' : ''}">
-      <div class="todo-check-wrap">
-        <div class="todo-check${ev.completed ? ' done' : ''}" onclick="App.toggleTodo('${ev.id}',event)"></div>
-      </div>
-      <div class="event-card-body" onclick="App.openEventDetail('${ev.id}','${ev.date||today()}')">
-        <div class="event-card-title">${titleHtml}</div>
-        ${meta ? `<div class="event-card-meta">${meta}</div>` : ''}
-        ${memberChips ? `<div class="event-card-members">${memberChips}</div>` : ''}
-      </div>
-    </div>`;
-  }).join(''));
+  // Idee 1: Privat-Anzeige
+  const hidden = isPrivateForOthers(ev);
+  const ownPrivIcon = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
+  const titleHtml = hidden ? '🔒 Privat' : (ownPrivIcon + ev.title);
+
+  return `<div class="event-card${ev.completed ? ' completed' : ''}">
+    <div class="todo-check-wrap">
+      <div class="todo-check${ev.completed ? ' done' : ''}" onclick="App.toggleTodo('${ev.id}',event)"></div>
+    </div>
+    <div class="event-card-body" onclick="App.openEventDetail('${ev.id}','${ev.date||today()}')">
+      <div class="event-card-title">${titleHtml}</div>
+      ${meta ? `<div class="event-card-meta">${meta}</div>` : ''}
+      ${memberChips ? `<div class="event-card-members">${memberChips}</div>` : ''}
+    </div>
+  </div>`;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1858,6 +1870,10 @@ let currentEventType = 'termin';
 function openAddEvent(type = 'termin', prefillDate = null, prefillTime = null) {
   state.editingEventId = null;
   currentEventType = type;
+
+  // In der Tagesansicht ohne explizites Datum: ausgewählten Tag vorbelegen (nicht "heute").
+  // Betrifft den oberen "+"-Button; Monats-/Wochenansicht bleiben auf today().
+  if (!prefillDate && state.currentView === 'tag') prefillDate = fmt(state.currentDate);
 
   document.getElementById('sheet-event-title').textContent =
     type === 'todo' ? 'Todo hinzufügen' :
