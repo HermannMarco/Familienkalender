@@ -2301,6 +2301,22 @@ async function saveEvent() {
     data.privateMemberId = null;
   }
 
+  // Zuweisungs-Push: bei NEUanlage eines Termins/Todos, der ausschließlich anderen
+  // Personen zugewiesen ist (nicht „Alle", nicht privat), bekommen diese eine einmalige
+  // Benachrichtigung. Der Server-Cron (send-reminders.js) liest assignNotifyPending,
+  // verschickt den Push und löscht das Flag → feuert genau einmal (~5 Min Verzögerung).
+  if (!state.editingEventId
+      && (currentEventType === 'termin' || currentEventType === 'todo')
+      && !privateMemberId
+      && Array.isArray(memberIds) && memberIds[0] !== 'all') {
+    const myMemberId = getCurrentMemberId();
+    const targets = memberIds.filter(id => id && id !== 'all' && id !== myMemberId);
+    if (targets.length > 0) {
+      data.assignNotifyPending = true;
+      data.assignNotify = { fromMemberId: myMemberId || null, targetMemberIds: targets };
+    }
+  }
+
   if (state.editingEventId) data.id = state.editingEventId;
 
   const btn = document.getElementById('btn-save-event');
@@ -2563,6 +2579,9 @@ async function advanceRecurringTodo(ev) {
   };
   // exceptions des Originals nicht mit kopieren — gehören zur Kette, nicht zur Einzelinstanz
   delete completedDoc.recurring.exceptions;
+  // Zuweisungs-Push gehört zur ursprünglichen Anlage, nicht zur erledigten Folgeinstanz
+  delete completedDoc.assignNotifyPending;
+  delete completedDoc.assignNotify;
 
   // 2) Original-Doc auf die nächste Instanz weiterschieben
   const update = { date: nextDate };
