@@ -1415,8 +1415,8 @@ function renderEventCard(ev, showDate = false) {
     ? members.map(id => {
         const m = getMember(id);
         if (!m) return '';
-        // Pt 19: photo avatar in chip
-        return `<span class="member-chip" style="${m.photo?'background:transparent;':'background:'+m.color+';'}">${getMemberAvatar(m,'sm')}<span style="margin-left:3px">${m.name}</span></span>`;
+        // Pt 19: photo avatar in chip — wie Todo-Karte: immer farbige Pille mit Name (sonst weiße Schrift unsichtbar auf weißer Karte)
+        return `<span class="member-chip" style="background:${m.color}">${getMemberAvatar(m,'sm')}<span style="margin-left:3px">${m.name}</span></span>`;
       }).join('')
     : (ev.memberIds?.[0] === 'all'
       ? '<span class="member-chip" style="background:#4361ee">Alle</span>'
