@@ -147,6 +147,40 @@ function getRecipientUids(ev, family) {
   return Object.keys(uidToMember).filter(uid => targetSet.has(uidToMember[uid]));
 }
 
+// ── Zuweisungs-Push: Empfänger + Payload ────────────────────
+function getUidsForMembers(memberIds, family) {
+  const uidToMember = family.uidToMember || {};
+  const set = new Set(memberIds || []);
+  return Object.keys(uidToMember).filter(uid => set.has(uidToMember[uid]));
+}
+function memberName(family, memberId) {
+  const m = (family.members || []).find(x => x.id === memberId);
+  return (m && m.name) || 'Jemand';
+}
+function formatAssignPayload(ev, family) {
+  const an = ev.assignNotify || {};
+  const fromName = memberName(family, an.fromMemberId);
+  const isTodo = ev.type === 'todo';
+  const title = isTodo
+    ? `${fromName} hat dir ein Todo zugewiesen`
+    : `${fromName} hat dir einen Termin erstellt`;
+  let body = ev.title || (isTodo ? 'Todo' : 'Termin');
+  if (ev.date) {
+    const dt = DateTime.fromISO(ev.date, { zone: 'Europe/Berlin' });
+    if (dt.isValid) {
+      const dayLabel = dt.setLocale('de').toFormat('ccc, dd.LL.');
+      const timeLabel = ev.startTime ? ` ${ev.startTime}` : '';
+      body += ` · ${dayLabel}${timeLabel}`;
+    }
+  }
+  return JSON.stringify({
+    title,
+    body,
+    tag: `assign|${ev.id}`,
+    data: { eventId: ev.id, date: ev.date || null },
+  });
+}
+
 // ── Payload-Body bauen ──────────────────────────────────────
 function formatBody(ev, dateISO, offsetMinutes) {
   const dt = DateTime.fromISO(dateISO, { zone: 'Europe/Berlin' });
@@ -182,6 +216,7 @@ function formatTitle(ev) {
 
   const families = await db.collection('families').get();
   let pushCount = 0;
+  let assignPushed = 0;
   let errCount = 0;
   let skippedDedup = 0;
   let processedEvents = 0;
@@ -298,6 +333,55 @@ function formatTitle(ev) {
       }
     }
 
+    // ── Zuweisungs-Pushes (einmalig, durch den Client gesetztes Flag) ──
+    // Schmale Query (meist leer) — feuert je Doc höchstens einmal: Flag wird in jedem
+    // Fall gelöscht, auch ohne Empfänger/Subscription, damit nichts dauerhaft pending bleibt.
+    let assignSnap;
+    try {
+      assignSnap = await famDoc.ref.collection('events').where('assignNotifyPending', '==', true).get();
+    } catch (e) {
+      assignSnap = { docs: [] };
+      console.error(`assignNotify query failed for family=${familyId}: ${e.message}`);
+    }
+    if (assignSnap.docs.length) {
+      const assignBatch = db.batch();
+      for (const evDoc of assignSnap.docs) {
+        const ev = { id: evDoc.id, ...evDoc.data() };
+        assignBatch.update(evDoc.ref, { assignNotifyPending: false });
+        if (ev.completed === true) continue;
+        const an = ev.assignNotify || {};
+        const targets = Array.isArray(an.targetMemberIds) ? an.targetMemberIds : [];
+        if (!targets.length) continue;
+        const recipients = getUidsForMembers(targets, family)
+          .filter(uid => (family.uidToMember || {})[uid] !== an.fromMemberId);
+        if (!recipients.length) continue;
+        const payloadStr = formatAssignPayload(ev, family);
+        for (const uid of recipients) {
+          const sub = subs[uid];
+          if (!sub || !sub.endpoint) continue;
+          try {
+            await webpush.sendNotification(sub, payloadStr);
+            pushCount++;
+            assignPushed++;
+          } catch (err) {
+            errCount++;
+            if (err.statusCode === 404 || err.statusCode === 410) {
+              if (!subCleanup.has(familyId)) subCleanup.set(familyId, new Set());
+              subCleanup.get(familyId).add(uid);
+              console.warn(`Subscription expired (${err.statusCode}) for uid=${uid} in family=${familyId} — will cleanup`);
+            } else {
+              console.error(`Assign push failed for uid=${uid}, family=${familyId}: ${err.statusCode || ''} ${err.message || err}`);
+            }
+          }
+        }
+      }
+      try {
+        await assignBatch.commit();
+      } catch (e) {
+        console.error(`assignNotify flag-clear failed for family=${familyId}: ${e.message}`);
+      }
+    }
+
     // Flag-Backfill/Pruning committen (nur Voll-Scan)
     if (flagBatch && flagWrites) {
       try {
@@ -351,6 +435,7 @@ function formatTitle(ev) {
   console.log(JSON.stringify({
     fullScan: doFullScan,
     pushed: pushCount,
+    assignPushed,
     errors: errCount,
     dedupSkipped: skippedDedup,
     trimmedDedup: trimmed,
