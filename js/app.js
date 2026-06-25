@@ -2130,20 +2130,19 @@ function renderMembersSelector(selectedIds) {
   const isAll = selectedIds.length === 0 || selectedIds[0] === 'all';
   let html = '';
 
-  html += `<div class="member-select-row" onclick="App.toggleAllMembers()">
-    <div class="member-select-check${isAll ? ' checked' : ''}" id="check-all"></div>
-    <div class="member-select-dot" style="background:#4361ee">A</div>
-    <div class="member-select-name">Alle</div>
-  </div>`;
+  html += `<button type="button" class="member-chip-select${isAll ? ' checked' : ''}" id="check-all"
+      style="--chip-color:#4361ee" onclick="App.toggleAllMembers()">
+    <span class="mcs-avatar" style="background:#4361ee">A</span>
+    <span class="mcs-name">Alle</span>
+  </button>`;
 
   for (const m of members) {
     const sel = !isAll && selectedIds.includes(m.id);
-    html += `<div class="member-select-row" onclick="App.toggleMember('${m.id}')">
-      <div class="member-select-check${sel ? ' checked' : ''}" id="check-${m.id}"></div>
+    html += `<button type="button" class="member-chip-select${sel ? ' checked' : ''}" id="check-${m.id}"
+        style="--chip-color:${m.color}" onclick="App.toggleMember('${m.id}')">
       ${getMemberAvatar(m,'sm')}
-      <div class="member-select-dot" style="background:${m.color}">${initials(m.name)}</div>
-      <div class="member-select-name">${m.name}</div>
-    </div>`;
+      <span class="mcs-name">${m.name}</span>
+    </button>`;
   }
   setHTML('event-members-selector', html);
 }
@@ -2190,8 +2189,7 @@ function toggleMember(id) {
 function applyPrivateLock(locked) {
   const selector = document.getElementById('event-members-selector');
   if (!selector) return;
-  const allRow = selector.querySelector('.member-select-row');
-  const memberRows = selector.querySelectorAll('.member-select-row');
+  const memberRows = selector.querySelectorAll('.member-chip-select');
 
   if (locked) {
     const myId = getCurrentMemberId();
@@ -2741,19 +2739,18 @@ function renderIcalMembersSelector(selectedIds) {
   const members = state.family?.members || [];
   const isAll = selectedIds.length === 0 || selectedIds[0] === 'all';
   let html = '';
-  html += `<div class="member-select-row" onclick="App.toggleIcalAllMembers()">
-    <div class="member-select-check${isAll ? ' checked' : ''}" id="ical-check-all"></div>
-    <div class="member-select-dot" style="background:#4361ee">A</div>
-    <div class="member-select-name">Alle</div>
-  </div>`;
+  html += `<button type="button" class="member-chip-select${isAll ? ' checked' : ''}" id="ical-check-all"
+      style="--chip-color:#4361ee" onclick="App.toggleIcalAllMembers()">
+    <span class="mcs-avatar" style="background:#4361ee">A</span>
+    <span class="mcs-name">Alle</span>
+  </button>`;
   for (const m of members) {
     const sel = !isAll && selectedIds.includes(m.id);
-    html += `<div class="member-select-row" onclick="App.toggleIcalMember('${m.id}')">
-      <div class="member-select-check${sel ? ' checked' : ''}" id="ical-check-${m.id}"></div>
+    html += `<button type="button" class="member-chip-select${sel ? ' checked' : ''}" id="ical-check-${m.id}"
+        style="--chip-color:${m.color}" onclick="App.toggleIcalMember('${m.id}')">
       ${getMemberAvatar(m,'sm')}
-      <div class="member-select-dot" style="background:${m.color}">${initials(m.name)}</div>
-      <div class="member-select-name">${m.name}</div>
-    </div>`;
+      <span class="mcs-name">${m.name}</span>
+    </button>`;
   }
   setHTML('ical-members-selector', html);
 }
