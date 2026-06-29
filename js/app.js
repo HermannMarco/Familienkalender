@@ -2629,12 +2629,29 @@ async function advanceRecurringTodo(ev) {
     .doc(ev.id).update(update));
 }
 
+// #1: Optische Belohnung beim Erledigen — Häkchen-Pop + grüne Welle, als transientes
+// Overlay an der Klick-Position (überlebt das Neu-Rendern der Liste).
+function celebrateTodo(el) {
+  if (!el || typeof el.getBoundingClientRect !== 'function') return;
+  const r = el.getBoundingClientRect();
+  const burst = document.createElement('div');
+  burst.className = 'todo-celebrate';
+  burst.style.left = (r.left + r.width / 2) + 'px';
+  burst.style.top  = (r.top + r.height / 2) + 'px';
+  burst.innerHTML = '<div class="tc-ring"></div><div class="tc-ring tc-ring2"></div><div class="tc-check">✓</div>';
+  document.body.appendChild(burst);
+  setTimeout(() => burst.remove(), 800);
+}
+
 async function toggleTodo(id, e) {
   if (e) e.stopPropagation();
   const ev = state.events.find(e2 => e2.id === id);
   if (!ev) return;
   // Idee 1: fremd-private Todos darf niemand außer dem Ersteller togglen
   if (!canEditEvent(ev)) return;
+
+  // #1: Belohnung nur beim Erledigen (nicht beim Wieder-Öffnen); Element synchron erfassen
+  if (!ev.completed && e) celebrateTodo(e.currentTarget);
 
   const isRecurringActive = ev.type === 'todo' && !ev.completed
     && ev.recurring && ev.recurring.type !== 'none';
@@ -3523,10 +3540,26 @@ function setupSwipeNav() {
       const dx = t.clientX - x0, dy = t.clientY - y0, dt = Date.now() - t0;
       // Eindeutig horizontal (mind. 60px, doppelt so stark wie vertikal, < 600ms)
       if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2 && dt < 600) {
-        if (dx < 0) navigateNext(); else navigatePrev();
+        if (dx < 0) { navigateNext(); animateViewSlide('next'); }
+        else        { navigatePrev(); animateViewSlide('prev'); }
       }
     }, { passive: true });
   });
+}
+
+// #2: Slide-In-Feedback nach Swipe — neue Ansicht fährt von rechts (next) bzw. links (prev) herein.
+// Ziel ist ein Element OHNE position:fixed-Kind (in der Tagesansicht die Liste, nicht #view-tag mit FAB).
+function animateViewSlide(dir) {
+  const targetId = state.currentView === 'tag' ? 'day-list'
+                 : state.currentView === 'woche' ? 'view-woche' : null;
+  if (!targetId) return;
+  const el = document.getElementById(targetId);
+  if (!el) return;
+  const cls = dir === 'next' ? 'slide-in-right' : 'slide-in-left';
+  el.classList.remove('slide-in-right', 'slide-in-left');
+  void el.offsetWidth; // Reflow erzwingen → Animation startet neu
+  el.classList.add(cls);
+  el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
 }
 
 // #10: Pull-to-refresh — am oberen Rand nach unten ziehen lädt die App neu (zieht auch neue SW-Version)
