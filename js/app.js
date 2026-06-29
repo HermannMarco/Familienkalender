@@ -1070,6 +1070,12 @@ function renderMonthView() {
   setHTML('month-grid', html);
 }
 
+// Kappt zu lange Titel in der Monatsansicht (ergänzt das CSS-Ellipsis, das nur breitenabhängig schneidet)
+function truncate(str, max) {
+  const s = str || '';
+  return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
+}
+
 function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
   const d = parseDate(ds);
   const dow = d.getDay();
@@ -1100,8 +1106,8 @@ function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
     // Idee 1: Privat-Anzeige
     const hidden = isPrivateForOthers(ev);
     const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
-    const titleDisp = hidden ? '🔒 Privat' : ev.title;
-    const label = hidden ? '🔒 Privat' : `${icon}${ownPriv}${ev.title}`;
+    const titleDisp = hidden ? '🔒 Privat' : truncate(ev.title, 42);
+    const label = hidden ? '🔒 Privat' : `${icon}${ownPriv}${titleDisp}`;
 
     // Pt 12: multi-day spanning indicator
     let spanCls = '';
@@ -1221,6 +1227,23 @@ function renderWeekView() {
   // Pt 2.2 Bug fix: only events with valid HH:MM startTime
   const timed  = allEvents.filter(e => e.startTime && e.startTime.length === 5);
 
+  // Dynamischer Zeitbereich: 1 Std. Puffer ober-/unterhalb des frühesten Starts bzw.
+  // spätesten Block-Endes (Endzeit oder Start+60 Min). Leere Woche → Fallback 8–20 Uhr.
+  let startHour = 8, endHour = 20;
+  if (timed.length) {
+    const toMin = t => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+    let minStart = Infinity, maxEnd = -Infinity;
+    for (const ev of timed) {
+      const s = toMin(ev.startTime);
+      const e = (ev.endTime && ev.endTime.length === 5) ? Math.max(toMin(ev.endTime), s + 15) : s + 60;
+      if (s < minStart) minStart = s;
+      if (e > maxEnd) maxEnd = e;
+    }
+    startHour = Math.max(0, Math.floor(minStart / 60) - 1);
+    endHour   = Math.min(24, Math.ceil(maxEnd / 60) + 1);
+    if (endHour <= startHour) endHour = Math.min(24, startHour + 1);
+  }
+
   // All-day row — Pt 12: multi-day spanning chips + Pt 7: feiertage
   const alldayByDay = {};
   const seenMultiday = new Set();
@@ -1286,10 +1309,10 @@ function renderWeekView() {
     alldayEl.classList.add('hidden');
   }
 
-  // Time grid
+  // Time grid (dynamischer Bereich startHour..endHour)
   let timesHtml = '';
-  for (let h = 0; h < 24; h++) {
-    timesHtml += `<div class="wg-time-label">${h > 0 ? h+':00' : ''}</div>`;
+  for (let h = startHour; h < endHour; h++) {
+    timesHtml += `<div class="wg-time-label">${h}:00</div>`;
   }
 
   let daysHtml = '';
@@ -1298,7 +1321,7 @@ function renderWeekView() {
     const dayEvents = timed.filter(e => e.date === ds);
 
     let colHtml = '';
-    for (let h = 0; h < 24; h++) {
+    for (let h = startHour; h < endHour; h++) {
       // Pt 8: click on time slot to create event
       colHtml += `<div class="wg-hour" onclick="App.openAddEvent('termin','${ds}','${String(h).padStart(2,'0')}:00')"></div>`;
     }
@@ -1309,7 +1332,7 @@ function renderWeekView() {
     for (const ev of dayEvents) {
       const [sh, sm] = ev.startTime.split(':').map(Number);
       const [eh, em] = (ev.endTime || `${String(sh+1).padStart(2,'0')}:00`).split(':').map(Number);
-      const top    = sh * H + sm / 60 * H;
+      const top    = (sh - startHour) * H + sm / 60 * H;
       const height = Math.max(22, (eh-sh)*H + (em-sm)/60*H);
       const bg     = getEventBg(ev);
       // Gleichmäßige Lane-Aufteilung bei Überlappung (volle Breite wenn allein)
@@ -1338,17 +1361,17 @@ function renderWeekView() {
   const weekDates = Array.from({length:7}, (_,i) => fmt(addDays(mon,i)));
   if (weekDates.includes(todayStr)) {
     const nowD = new Date();
-    const nowTop = nowD.getHours() * H + nowD.getMinutes() / 60 * H;
-    nowLineHtml = `<div class="week-now-line" style="top:${nowTop}px"><div class="now-dot"></div></div>`;
+    const nowHrs = nowD.getHours() + nowD.getMinutes() / 60;
+    // Now-Linie nur zeichnen, wenn die aktuelle Zeit im sichtbaren Bereich liegt
+    if (nowHrs >= startHour && nowHrs < endHour) {
+      const nowTop = (nowHrs - startHour) * H;
+      nowLineHtml = `<div class="week-now-line" style="top:${nowTop}px"><div class="now-dot"></div></div>`;
+    }
   }
 
   setHTML('week-grid',
     `<div class="wg-wrap"><div class="wg-times">${timesHtml}</div><div class="wg-days" style="position:relative">${daysHtml}${nowLineHtml}</div></div>`);
-
-  setTimeout(() => {
-    const wrap = document.querySelector('#view-woche .time-scroll-wrap');
-    if (wrap) wrap.scrollTop = 8 * H;
-  }, 150);
+  // Kein Auto-Scroll mehr nötig: der Bereich beginnt jetzt 1 Std. vor dem ersten Termin (Top sichtbar).
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -1398,6 +1421,12 @@ function renderDayView() {
   }
 
   setHTML('day-list', html);
+}
+
+// Oberer "+"-Button im Header: öffnet je nach aktivem Tab das passende Template
+function openAddForCurrentTab() {
+  const typeByTab = { todos: 'todo', geburtstage: 'geburtstag' };
+  openAddEvent(typeByTab[state.currentTab] || 'termin');
 }
 
 function openAddEventForCurrentDay() {
@@ -2864,6 +2893,14 @@ function setTab(tab) {
   const showViewTabs = tab === 'kalender';
   document.getElementById('view-tabs').classList.toggle('hidden', !showViewTabs);
 
+  // Monatsnavigation (Pfeile + Datumstitel) nur im Kalender-Tab anzeigen
+  const btnPrev = document.getElementById('btn-prev');
+  const btnNext = document.getElementById('btn-next');
+  const titleBtn = document.querySelector('.header-title-btn');
+  if (btnPrev) btnPrev.style.display = showViewTabs ? '' : 'none';
+  if (btnNext) btnNext.style.display = showViewTabs ? '' : 'none';
+  if (titleBtn) titleBtn.style.display = showViewTabs ? '' : 'none';
+
   if (tab === 'kalender') renderCalendar();
   else if (tab === 'todos') renderTodos();
   else if (tab === 'geburtstage') renderBirthdays();
@@ -3469,6 +3506,87 @@ function setupOfflineBanner() {
   if (!navigator.onLine) show();
 }
 
+// #7: Horizontale Swipe-Gesten in Tag-/Wochenansicht → vor/zurück blättern
+function setupSwipeNav() {
+  ['view-tag', 'view-woche'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    let x0 = 0, y0 = 0, t0 = 0, tracking = false;
+    el.addEventListener('touchstart', e => {
+      if (e.touches.length !== 1) { tracking = false; return; }
+      x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); tracking = true;
+    }, { passive: true });
+    el.addEventListener('touchend', e => {
+      if (!tracking) return;
+      tracking = false;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - x0, dy = t.clientY - y0, dt = Date.now() - t0;
+      // Eindeutig horizontal (mind. 60px, doppelt so stark wie vertikal, < 600ms)
+      if (Math.abs(dx) > 60 && Math.abs(dx) > Math.abs(dy) * 2 && dt < 600) {
+        if (dx < 0) navigateNext(); else navigatePrev();
+      }
+    }, { passive: true });
+  });
+}
+
+// #10: Pull-to-refresh — am oberen Rand nach unten ziehen lädt die App neu (zieht auch neue SW-Version)
+function setupPullToRefresh() {
+  const screen  = document.getElementById('screen-app');
+  const spinner = document.getElementById('ptr-spinner');
+  if (!screen || !spinner) return;
+  const THRESHOLD = 70, MAX = 90;
+  let startY = 0, pulling = false, dyLast = 0;
+
+  // Ist der nächste scrollbare Vorfahr ganz oben (oder gibt es keinen)?
+  const scrollParentAtTop = (el) => {
+    while (el && el !== screen) {
+      const oy = getComputedStyle(el).overflowY;
+      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) {
+        return el.scrollTop <= 0;
+      }
+      el = el.parentElement;
+    }
+    return true;
+  };
+  const blocked = () =>
+    screen.classList.contains('hidden') ||
+    document.querySelector('.bottom-sheet.open') ||
+    !document.getElementById('search-bar')?.classList.contains('hidden');
+
+  screen.addEventListener('touchstart', e => {
+    if (e.touches.length !== 1 || blocked() || !scrollParentAtTop(e.target)) { pulling = false; return; }
+    startY = e.touches[0].clientY; pulling = true; dyLast = 0;
+  }, { passive: true });
+
+  screen.addEventListener('touchmove', e => {
+    if (!pulling) return;
+    const dy = e.touches[0].clientY - startY;
+    spinner.style.transition = 'none';
+    if (dy <= 0) { dyLast = 0; spinner.style.transform = 'translateY(-60px)'; spinner.style.opacity = '0'; return; }
+    dyLast = dy;
+    const pull = Math.min(dy, MAX);
+    spinner.style.transform = `translateY(${Math.min(pull - 28, 12)}px) rotate(${pull * 3}deg)`;
+    spinner.style.opacity = String(Math.min(pull / THRESHOLD, 1));
+  }, { passive: true });
+
+  const end = () => {
+    if (!pulling) return;
+    pulling = false;
+    spinner.style.transition = 'transform .25s, opacity .25s';
+    if (dyLast >= THRESHOLD) {
+      spinner.style.transform = '';   // CSS .refreshing übernimmt Position + Spin
+      spinner.style.opacity = '';
+      spinner.classList.add('refreshing');
+      setTimeout(() => location.reload(), 450);
+    } else {
+      spinner.style.transform = 'translateY(-60px)';
+      spinner.style.opacity = '0';
+    }
+  };
+  screen.addEventListener('touchend', end, { passive: true });
+  screen.addEventListener('touchcancel', end, { passive: true });
+}
+
 function startApp(familyId) {
   state.familyId = familyId;
   hideEl('screen-loading');
@@ -3739,7 +3857,7 @@ const App = {
   setView, setTab,
   navigatePrev, navigateNext, goToToday, goToDay,
   selectDay, closeDayPanel,
-  openAddEvent, openAddEventForCurrentDay, openEditEvent, saveEvent,
+  openAddEvent, openAddForCurrentTab, openAddEventForCurrentDay, openEditEvent, saveEvent,
   openEventDetail, editCurrentEvent, deleteCurrentEvent,
   applyRecurringAction,
   toggleTodo, toggleTodoFromDetail,
@@ -3817,6 +3935,8 @@ const App = {
   } catch {}
 
   setupOfflineBanner();
+  setupSwipeNav();        // #7: Swipe Tag/Woche
+  setupPullToRefresh();   // #10: Pull-to-refresh
 
   // Pt 18: apply saved theme immediately
   applyTheme();
