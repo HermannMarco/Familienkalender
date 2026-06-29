@@ -517,6 +517,37 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .ptr-spinner.refreshing { transform: translateY(10px); opacity: 1; }
 .ptr-spinner.refreshing svg { animation: ptr-spin .7s linear infinite; }
 @keyframes ptr-spin { to { transform: rotate(360deg); } }
+
+/* #1: Todo-Belohnung — Häkchen-Pop + grüne Welle (transientes Overlay) */
+.todo-celebrate { position: fixed; z-index: 200; pointer-events: none; transform: translate(-50%, -50%); }
+.tc-ring {
+  position: absolute; left: 0; top: 0;
+  width: 26px; height: 26px; margin: -13px 0 0 -13px;
+  border-radius: 50%; border: 2.5px solid var(--success);
+  animation: tc-ring .6s ease-out forwards;
+}
+.tc-ring.tc-ring2 { animation-delay: .12s; border-width: 2px; opacity: 0; }
+@keyframes tc-ring {
+  0%   { transform: scale(.5); opacity: .9; }
+  100% { transform: scale(3.2); opacity: 0; }
+}
+.tc-check {
+  position: absolute; left: 0; top: 0;
+  transform: translate(-50%, -50%) scale(0);
+  color: var(--success); font-size: 22px; font-weight: 900; line-height: 1;
+  animation: tc-pop .55s cubic-bezier(.18,.89,.32,1.28) forwards;
+}
+@keyframes tc-pop {
+  0%   { transform: translate(-50%,-50%) scale(0); opacity: 1; }
+  55%  { transform: translate(-50%,-50%) scale(1.35); opacity: 1; }
+  100% { transform: translate(-50%,-50%) scale(1); opacity: 0; }
+}
+
+/* #2: Slide-In der neuen Tages-/Wochenansicht nach Swipe */
+.slide-in-right { animation: viewSlideRight .22s ease-out; }
+.slide-in-left  { animation: viewSlideLeft  .22s ease-out; }
+@keyframes viewSlideRight { from { transform: translateX(30px); opacity: .35; } to { transform: translateX(0); opacity: 1; } }
+@keyframes viewSlideLeft  { from { transform: translateX(-30px); opacity: .35; } to { transform: translateX(0); opacity: 1; } }
 .header-today-badge {
   display: inline-block;
   margin-left: 6px;
