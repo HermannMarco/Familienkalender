@@ -497,6 +497,26 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 }
 .fab-add svg { width: 26px; height: 26px; }
 .fab-add:active { transform: scale(.92); background: var(--primary-dark); }
+
+/* #10: Pull-to-refresh Spinner */
+.ptr-spinner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top) + 4px);
+  left: 50%; margin-left: -18px;
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgba(0,0,0,.18);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 60;
+  transform: translateY(-60px);
+  opacity: 0;
+  pointer-events: none;
+}
+.ptr-spinner svg { width: 20px; height: 20px; color: var(--primary); }
+.ptr-spinner.refreshing { transform: translateY(10px); opacity: 1; }
+.ptr-spinner.refreshing svg { animation: ptr-spin .7s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
 .header-today-badge {
   display: inline-block;
   margin-left: 6px;
