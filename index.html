@@ -160,6 +160,14 @@
 ══════════════════════════════════════════ -->
 <div id="screen-app" class="hidden">
 
+  <!-- #10: Pull-to-refresh Spinner -->
+  <div id="ptr-spinner" class="ptr-spinner" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+      <polyline points="23 4 23 10 17 10"></polyline>
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+    </svg>
+  </div>
+
   <!-- Header -->
   <header id="app-header">
     <div class="header-left">
@@ -185,7 +193,7 @@
           <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
         </svg>
       </button>
-      <button class="icon-btn btn-add" onclick="App.openAddEvent()" aria-label="Hinzufügen">
+      <button class="icon-btn btn-add" onclick="App.openAddForCurrentTab()" aria-label="Hinzufügen">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
           <line x1="12" y1="5" x2="12" y2="19"></line>
           <line x1="5" y1="12" x2="19" y2="12"></line>
@@ -271,10 +279,6 @@
     <div id="tab-todos" class="tab-pane hidden">
       <div class="tab-top-bar">
         <h2>Todos</h2>
-        <button class="btn-icon-text" onclick="App.openAddEvent('todo')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Todo
-        </button>
       </div>
       <!-- Person Filter Bar Todos (Pt 16) -->
       <div id="person-filter-bar-todos" class="person-filter-bar hidden"></div>
@@ -290,10 +294,6 @@
     <div id="tab-geburtstage" class="tab-pane hidden">
       <div class="tab-top-bar">
         <h2>Geburtstage</h2>
-        <button class="btn-icon-text" onclick="App.openAddEvent('geburtstag')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Geburtstag
-        </button>
       </div>
       <div id="birthday-list" class="item-list"></div>
     </div>
