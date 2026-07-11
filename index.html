@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/icon.svg">
   <link rel="stylesheet" href="css/app.css">
 </head>
-<body>
+<body class="ls-nav-collapsed">
 
 <!-- Offline Banner (Overlay über allen Screens) -->
 <div id="offline-banner" class="offline-banner hidden">
@@ -171,6 +171,12 @@
   <!-- Header -->
   <header id="app-header">
     <div class="header-left">
+      <!-- Task 2: nur im Handy-Querformat sichtbar → Navigation ein-/ausklappen -->
+      <button class="icon-btn ls-nav-toggle" id="ls-nav-toggle" onclick="App.toggleLandscapeNav()" aria-label="Navigation ein- oder ausblenden">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="6 9 12 15 18 9"></polyline>
+        </svg>
+      </button>
       <button class="icon-btn" id="btn-prev" onclick="App.navigatePrev()" aria-label="Zurück">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <polyline points="15 18 9 12 15 6"></polyline>
