@@ -1076,6 +1076,12 @@ function truncate(str, max) {
   return s.length > max ? s.slice(0, max - 1).trimEnd() + '…' : s;
 }
 
+// Mobile Endgeräte (Touch) → kürzere Monats-Chips. Bleibt pro Gerät stabil
+// (Phone = coarse, Desktop = fine), daher kein Re-Render bei Rotation nötig.
+function isMobileDevice() {
+  return window.matchMedia('(pointer: coarse)').matches;
+}
+
 function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
   const d = parseDate(ds);
   const dow = d.getDay();
@@ -1106,7 +1112,7 @@ function renderMonthCell(ds, dayNum, otherMonth, events, todayStr) {
     // Idee 1: Privat-Anzeige
     const hidden = isPrivateForOthers(ev);
     const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
-    const titleDisp = hidden ? '🔒 Privat' : truncate(ev.title, 42);
+    const titleDisp = hidden ? '🔒 Privat' : truncate(ev.title, isMobileDevice() ? 27 : 42);
     const label = hidden ? '🔒 Privat' : `${icon}${ownPriv}${titleDisp}`;
 
     // Pt 12: multi-day spanning indicator
@@ -2901,6 +2907,13 @@ function setView(view) {
   renderCalendar();
 }
 
+// Task 2: Im Handy-Querformat Navigation (Ansichts-Tabs/Personenfilter/Bottom-Nav)
+// ein-/ausklappen. Wirkt nur innerhalb der Landscape-Media-Query; in Portrait/Desktop
+// ist die Klasse inert. Chevron im Header dreht sich je nach Zustand.
+function toggleLandscapeNav() {
+  document.body.classList.toggle('ls-nav-collapsed');
+}
+
 function setTab(tab) {
   state.currentTab = tab;
   document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
@@ -3887,7 +3900,7 @@ function collectRemindersFromForm() {
 const App = {
   showSetupChoice, showSetupCreate, showSetupJoin,
   createFamily, joinFamily,
-  setView, setTab,
+  setView, setTab, toggleLandscapeNav,
   navigatePrev, navigateNext, goToToday, goToDay,
   selectDay, closeDayPanel,
   openAddEvent, openAddForCurrentTab, openAddEventForCurrentDay, openEditEvent, saveEvent,
@@ -3983,6 +3996,10 @@ const App = {
     if (mv) {
       mv.content = 'width=device-width, initial-scale=1.0, maximum-scale=1.0';
       setTimeout(() => { mv.content = 'width=device-width, initial-scale=1.0, viewport-fit=cover'; }, 400);
+    }
+    // Task 2: Beim Wechsel ins Querformat Navigation eingeklappt starten.
+    if (window.matchMedia('(orientation: landscape)').matches) {
+      document.body.classList.add('ls-nav-collapsed');
     }
   });
 
