@@ -1566,15 +1566,23 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 .ls-nav-toggle svg { transition: transform .2s; }
 body:not(.ls-nav-collapsed) .ls-nav-toggle svg { transform: rotate(180deg); }
 
-/* Handy im Querformat: kurze Höhe (≤500px) grenzt Phones von Tablets/Desktop ab. */
-@media (orientation: landscape) and (max-height: 500px) {
+/* Handy im Querformat: kurze Höhe (≤500px) grenzt Phones von Tablets/Desktop ab.
+   pointer: coarse = nur Touch-Geräte → Chevron/Einklappen erscheint nie auf
+   Desktop/Laptop (auch nicht bei niedrigem Fenster). */
+@media (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   /* Toggle-Pfeil sichtbar machen */
   .ls-nav-toggle { display: flex; }
 
-  /* Eingeklappt: Ansichts-Tabs, Personenfilter und Bottom-Nav ausblenden */
+  /* Eingeklappt: Ansichts-Tabs, Personenfilter und Bottom-Nav ausblenden.
+     Zusätzlich die Tab-Kopfzeilen (Todos/Geburtstage-Überschrift) und die
+     Todo-Filterleiste (Offen/Erledigt/Alle), damit der Einklapp-Effekt auch
+     auf Todos/Geburtstage/Einstellungen den vollen Inhalt zeigt — analog zum
+     Kalender (Einstellungen hat keine Kopfzeile, klappt allein via Bottom-Nav). */
   body.ls-nav-collapsed #view-tabs,
   body.ls-nav-collapsed #person-filter-bar,
   body.ls-nav-collapsed #person-filter-bar-todos,
+  body.ls-nav-collapsed .tab-top-bar,
+  body.ls-nav-collapsed .filter-bar,
   body.ls-nav-collapsed #bottom-nav {
     display: none !important;
   }
