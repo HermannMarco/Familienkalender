@@ -1484,8 +1484,11 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
 }
 
 /* ── Desktop / breite Viewports ──────────────────────────
-   Greift ab 768px Breite. Mobile Werte oben bleiben default. */
-@media (min-width: 768px) {
+   Greift ab 768px Breite MIT Maus/Trackpad (pointer: fine).
+   Task 3: (pointer: fine) verhindert, dass ein iPhone im Querformat (Breite
+   ~844px, aber Touch = coarse) fälschlich die vergrößerten Desktop-Styles bekommt
+   → im Handy-Querformat bleiben die kompakten Mobil-Werte, volle Breite sichtbar. */
+@media (min-width: 768px) and (pointer: fine) {
   /* Header größer & lesbarer */
   :root { --header-h: 64px; }
   .header-title-btn { font-size: 1.4rem; padding: 8px 14px; }
@@ -1552,6 +1555,28 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   .event-block .member-dot {
     width: 39px !important; height: 39px !important;
     font-size: 1rem !important;
+  }
+}
+
+/* ── Task 2: Handy im Querformat — Navigation einklappbar ──────────
+   Chevron-Pfeil im Header (nur Landscape sichtbar). Zeigt eingeklappt nach
+   unten (= ausklappen), ausgeklappt nach oben. Global definiert, aber der
+   Button selbst ist außerhalb des Querformats via display:none unsichtbar. */
+.ls-nav-toggle { display: none; }
+.ls-nav-toggle svg { transition: transform .2s; }
+body:not(.ls-nav-collapsed) .ls-nav-toggle svg { transform: rotate(180deg); }
+
+/* Handy im Querformat: kurze Höhe (≤500px) grenzt Phones von Tablets/Desktop ab. */
+@media (orientation: landscape) and (max-height: 500px) {
+  /* Toggle-Pfeil sichtbar machen */
+  .ls-nav-toggle { display: flex; }
+
+  /* Eingeklappt: Ansichts-Tabs, Personenfilter und Bottom-Nav ausblenden */
+  body.ls-nav-collapsed #view-tabs,
+  body.ls-nav-collapsed #person-filter-bar,
+  body.ls-nav-collapsed #person-filter-bar-todos,
+  body.ls-nav-collapsed #bottom-nav {
+    display: none !important;
   }
 }
 
