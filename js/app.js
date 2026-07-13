@@ -203,7 +203,12 @@ function expandEvent(event, rangeStart, rangeEnd) {
   const exceptions = new Set(event.recurring.exceptions || []);
   const instances = [];
   const startDate = parseDate(event.date);
-  const endLimit  = endDate ? parseDate(endDate) : null;
+  // #4: Serienende auch respektieren, wenn der User das obere "Enddatum"-Feld
+  // (event.endDate) statt "Wiederholen → Endet → Bis Datum" (recurring.endDate)
+  // benutzt hat. Bei Serien gibt es keinen legitimen Mehrtages-Span, daher ist
+  // event.endDate hier eindeutig als Serienende zu werten.
+  const seriesEnd = endDate || event.endDate || null;
+  const endLimit  = seriesEnd ? parseDate(seriesEnd) : null;
 
   // Bug 3: wöchentliche Wiederholung mit daysOfWeek (z.B. Di+Do+Sa).
   // daysOfWeek nutzt JS getDay()-Konventionen (0=So..6=Sa, siehe wday-btn).
@@ -1250,9 +1255,13 @@ function renderWeekView() {
     if (endHour <= startHour) endHour = Math.min(24, startHour + 1);
   }
 
-  // All-day row — Pt 12: multi-day spanning chips + Pt 7: feiertage
+  // All-day row — Pt 7: Feiertage + Pt 12: mehrtägige Termine.
+  // #3: Mehrtägige Ganztags-Termine werden pro Tag als eigener Block-Chip gerendert
+  // (span-start/mid/end wie in der Monatsansicht) — NICHT mehr als ein absolut
+  // positionierter breiter Chip, der andere Ganztags-Termine/Geburtstage auf den
+  // überspannten Tagen verdeckt hätte. expandEvent liefert für Mehrtages-Events
+  // bereits eine Instanz pro Tag (date = jeweiliger Tag).
   const alldayByDay = {};
-  const seenMultiday = new Set();
   for (let i = 0; i < 7; i++) {
     const ds = fmt(addDays(mon, i));
     alldayByDay[ds] = [];
@@ -1264,24 +1273,8 @@ function renderWeekView() {
     if (hol) alldayByDay[ds].push({ _isHoliday: true, title: hol, date: ds });
   }
   for (const ev of allDay) {
-    if (ev._multiDay) {
-      // For multi-day in week view: show once per event (start or first visible day)
-      const startDs = ev._multiDayStart >= fmt(mon) ? ev._multiDayStart : fmt(mon);
-      if (!seenMultiday.has(ev.id + ev._multiDayStart)) {
-        seenMultiday.add(ev.id + ev._multiDayStart);
-        // Calculate span (days within this week)
-        let spanCount = 0;
-        let cur = parseDate(startDs);
-        const endD = parseDate(ev._multiDayEnd);
-        const weekEnd = addDays(mon, 6);
-        while (cur <= endD && cur <= weekEnd) { spanCount++; cur = addDays(cur, 1); }
-        if (!alldayByDay[startDs]) alldayByDay[startDs] = [];
-        alldayByDay[startDs].push({ ...ev, _weekSpan: spanCount });
-      }
-    } else {
-      if (!alldayByDay[ev.date]) alldayByDay[ev.date] = [];
-      alldayByDay[ev.date].push(ev);
-    }
+    if (!alldayByDay[ev.date]) alldayByDay[ev.date] = [];
+    alldayByDay[ev.date].push(ev);
   }
 
   let alldayDays = '';
@@ -1290,20 +1283,24 @@ function renderWeekView() {
     const ds = fmt(addDays(mon, i));
     const evs = alldayByDay[ds] || [];
     if (evs.length) hasAllday = true;
-    alldayDays += `<div class="wg-day" style="min-height:${evs.length?28:4}px;overflow:visible;position:relative">${evs.map(ev => {
+    alldayDays += `<div class="wg-day" style="min-height:${evs.length?28:4}px;overflow:visible">${evs.map(ev => {
       if (ev._isHoliday) {
         return `<div class="cell-event-chip holiday-chip" title="${ev.title}">${ev.title}</div>`;
       }
       const bg = getEventBg(ev);
       const icon = ev.type === 'geburtstag' ? '🎁 ' : '';
-      const span = ev._weekSpan || 1;
-      // Pt 12: spanning style
-      const spanStyle = span > 1 ? `position:absolute;left:0;width:calc(${span*100}% + ${(span-1)}px);z-index:2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;` : '';
+      // Pt 12: mehrtägige Termine visuell verbinden (Chip pro Tag, kein Verdecken)
+      let spanCls = '';
+      if (ev._multiDay) {
+        if (ev._multiDayStart === ev.date) spanCls = ' span-start';
+        else if (ev._multiDayEnd === ev.date) spanCls = ' span-end';
+        else spanCls = ' span-mid';
+      }
       // Idee 1: Privat-Anzeige
       const hidden = isPrivateForOthers(ev);
       const ownPriv = (ev.privateMemberId && !hidden) ? '🔒 ' : '';
       const titleHtml = hidden ? '🔒 Privat' : `${icon}${ownPriv}${ev.title}`;
-      return `<div class="cell-event-chip${ev._multiDay?' multi-day-chip':''}" style="background:${bg};margin:1px;cursor:pointer;${spanStyle}" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${titleHtml}</div>`;
+      return `<div class="cell-event-chip${ev._multiDay?' multi-day-chip':''}${spanCls}" style="background:${bg};margin:1px;cursor:pointer" onclick="App.openEventDetail('${ev.id}','${ev.date}')">${titleHtml}</div>`;
     }).join('')}</div>`;
   }
 
@@ -2103,14 +2100,9 @@ function applyEventTypeUI(type) {
   document.getElementById('recurring-group').classList.toggle('hidden', isBirthday);
   document.getElementById('event-type-group').classList.toggle('hidden', !!state.editingEventId);
 
-  // Pt 10.2: hide endDate for birthdays; preserve value across type switches
-  const edg = document.getElementById('end-date-group');
-  if (edg) {
-    const endInp = document.getElementById('event-end-date');
-    const savedEnd = endInp ? endInp.value : '';
-    edg.classList.toggle('hidden', isBirthday);
-    if (endInp && savedEnd) endInp.value = savedEnd;
-  }
+  // Pt 10.2 / #4 UX: Enddatum-Feld ("für Zeitraum") ausblenden bei Geburtstagen
+  // UND bei Serien (dort zählt das Serienende unter "Endet → Bis Datum").
+  updateEndDateVisibility();
 
   // Pt 6: show no-year checkbox only for birthdays
   const noYearGroup = document.getElementById('no-year-group');
@@ -2146,6 +2138,36 @@ function toggleRecurringOptions() {
   document.getElementById('recurring-options').classList.toggle('hidden', val === 'none');
   if (val !== 'none') updateRecurringUnitLabel(val);
   document.getElementById('recurring-weekdays').classList.toggle('hidden', val !== 'weekly');
+  updateEndDateVisibility();
+}
+
+// #4 UX: Das obere "Enddatum (für Zeitraum)" hat bei Serien keine Bedeutung — dort
+// wird das Serienende über "Endet → Bis Datum" gesetzt. Feld daher bei aktivem Turnus
+// (und bei Geburtstagen) ausblenden, damit die zwei Enddatum-Felder nicht verwechselt
+// werden. Steht oben noch ein Wert (Altbestand, der das obere Feld als Serienende
+// missbraucht hat), diesen ins sichtbare Serienende migrieren, BEVOR wir ausblenden —
+// sonst löscht Mobile den Wert beim display:none.
+function updateEndDateVisibility() {
+  const edg = document.getElementById('end-date-group');
+  if (!edg) return;
+  const endInp     = document.getElementById('event-end-date');
+  const isBirthday = currentEventType === 'geburtstag';
+  const recActive  = (document.getElementById('event-recurring')?.value || 'none') !== 'none';
+
+  if (recActive && !isBirthday && endInp && endInp.value) {
+    const endTypeEl = document.getElementById('recurring-end-type');
+    if (endTypeEl && endTypeEl.value === 'never') {
+      endTypeEl.value = 'date';
+      document.getElementById('recurring-end-date').value = endInp.value;
+      toggleRecurringEnd();
+    }
+    endInp.value = '';
+  }
+
+  const savedEnd = endInp ? endInp.value : '';
+  edg.classList.toggle('hidden', isBirthday || recActive);
+  // Wert nur zurückschreiben, solange das Feld sichtbar bleibt (sonst Mobile-Clear).
+  if (endInp && savedEnd && !edg.classList.contains('hidden')) endInp.value = savedEnd;
 }
 
 function updateRecurringUnitLabel(type) {
@@ -2409,9 +2431,21 @@ function openEventDetail(id, dateStr) {
   html += `<div class="detail-title">${titleDisp}</div>`;
 
   // Date row
-  const dateRangeLabel = (ev.endDate && ev.endDate !== ev.date)
-    ? `${formatDisplay(ev.date)} – ${formatDisplay(ev.endDate)}`
-    : formatDisplay(detailEventDate);
+  // #2: Bei Geburtstagen den KOMMENDEN Geburtstag (nächste Jahresinstanz) mit
+  // korrektem Wochentag zeigen — nicht das Geburtsdatum/-jahr, dessen Wochentag
+  // in der Vergangenheit liegt. Im Kalender ist das schon korrekt (Jahres-Instanz).
+  let dateRangeLabel;
+  if (ev.type === 'geburtstag') {
+    const todayD = parseDate(today());
+    const base = parseDate(ev._originalDate || ev.date);
+    let next = new Date(todayD.getFullYear(), base.getMonth(), base.getDate());
+    if (next < todayD) next = new Date(todayD.getFullYear() + 1, base.getMonth(), base.getDate());
+    dateRangeLabel = `${DE_WEEKDAYS[next.getDay()]}, ${next.getDate()}. ${DE_MONTHS[next.getMonth()]}`;
+  } else {
+    dateRangeLabel = (ev.endDate && ev.endDate !== ev.date)
+      ? `${formatDisplay(ev.date)} – ${formatDisplay(ev.endDate)}`
+      : formatDisplay(detailEventDate);
+  }
   html += `<div class="detail-meta-row">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
     ${dateRangeLabel}
@@ -3575,64 +3609,6 @@ function animateViewSlide(dir) {
   el.addEventListener('animationend', () => el.classList.remove(cls), { once: true });
 }
 
-// #10: Pull-to-refresh — am oberen Rand nach unten ziehen lädt die App neu (zieht auch neue SW-Version)
-function setupPullToRefresh() {
-  const screen  = document.getElementById('screen-app');
-  const spinner = document.getElementById('ptr-spinner');
-  if (!screen || !spinner) return;
-  const THRESHOLD = 70, MAX = 90;
-  let startY = 0, pulling = false, dyLast = 0;
-
-  // Ist der nächste scrollbare Vorfahr ganz oben (oder gibt es keinen)?
-  const scrollParentAtTop = (el) => {
-    while (el && el !== screen) {
-      const oy = getComputedStyle(el).overflowY;
-      if ((oy === 'auto' || oy === 'scroll') && el.scrollHeight > el.clientHeight) {
-        return el.scrollTop <= 0;
-      }
-      el = el.parentElement;
-    }
-    return true;
-  };
-  const blocked = () =>
-    screen.classList.contains('hidden') ||
-    document.querySelector('.bottom-sheet.open') ||
-    !document.getElementById('search-bar')?.classList.contains('hidden');
-
-  screen.addEventListener('touchstart', e => {
-    if (e.touches.length !== 1 || blocked() || !scrollParentAtTop(e.target)) { pulling = false; return; }
-    startY = e.touches[0].clientY; pulling = true; dyLast = 0;
-  }, { passive: true });
-
-  screen.addEventListener('touchmove', e => {
-    if (!pulling) return;
-    const dy = e.touches[0].clientY - startY;
-    spinner.style.transition = 'none';
-    if (dy <= 0) { dyLast = 0; spinner.style.transform = 'translateY(-60px)'; spinner.style.opacity = '0'; return; }
-    dyLast = dy;
-    const pull = Math.min(dy, MAX);
-    spinner.style.transform = `translateY(${Math.min(pull - 28, 12)}px) rotate(${pull * 3}deg)`;
-    spinner.style.opacity = String(Math.min(pull / THRESHOLD, 1));
-  }, { passive: true });
-
-  const end = () => {
-    if (!pulling) return;
-    pulling = false;
-    spinner.style.transition = 'transform .25s, opacity .25s';
-    if (dyLast >= THRESHOLD) {
-      spinner.style.transform = '';   // CSS .refreshing übernimmt Position + Spin
-      spinner.style.opacity = '';
-      spinner.classList.add('refreshing');
-      setTimeout(() => location.reload(), 450);
-    } else {
-      spinner.style.transform = 'translateY(-60px)';
-      spinner.style.opacity = '0';
-    }
-  };
-  screen.addEventListener('touchend', end, { passive: true });
-  screen.addEventListener('touchcancel', end, { passive: true });
-}
-
 function startApp(familyId) {
   state.familyId = familyId;
   hideEl('screen-loading');
@@ -3982,7 +3958,6 @@ const App = {
 
   setupOfflineBanner();
   setupSwipeNav();        // #7: Swipe Tag/Woche
-  setupPullToRefresh();   // #10: Pull-to-refresh
 
   // Pt 18: apply saved theme immediately
   applyTheme();
