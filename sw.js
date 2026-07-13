@@ -1,4 +1,4 @@
-const CACHE = 'familienkalender-v39';
+const CACHE = 'familienkalender-v40';
 const ASSETS = [
   './',
   './index.html',
@@ -7,6 +7,8 @@ const ASSETS = [
   './js/firebase-config.js',
   './js/app.js',
   './icons/icon.svg',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
 ];
 
 self.addEventListener('install', e => {
@@ -52,8 +54,8 @@ self.addEventListener('push', (event) => {
   const title = payload.title || 'Familienkalender';
   const options = {
     body: payload.body || '',
-    icon: './icons/icon.svg',
-    badge: './icons/icon.svg',
+    icon: './icons/icon-192.png',
+    badge: './icons/icon-192.png',
     tag: payload.tag || `event-${Date.now()}`,
     data: payload.data || {},
     requireInteraction: false,
