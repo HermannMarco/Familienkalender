@@ -369,6 +369,24 @@
           <div id="ical-import-status" class="ical-status hidden"></div>
         </section>
 
+        <!-- Excel-Export (nur Termine) -->
+        <section class="settings-section">
+          <h3>Termine exportieren</h3>
+          <p class="settings-hint">Alle Termine eines Zeitraums als Excel-Datei. Fremde private Termine erscheinen nur als „🔒 Privat“.</p>
+          <div class="export-range">
+            <div class="form-group">
+              <label class="form-label" for="export-from">Von</label>
+              <input type="date" id="export-from" class="form-input">
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="export-to">Bis</label>
+              <input type="date" id="export-to" class="form-input">
+            </div>
+          </div>
+          <button class="btn-secondary btn-full" id="btn-export" onclick="App.exportTermine()">Als Excel exportieren (.xlsx)</button>
+          <div id="export-status" class="ical-status hidden"></div>
+        </section>
+
         <!-- Pt 18: Night Mode -->
         <section class="settings-section">
           <h3>Erscheinungsbild</h3>
