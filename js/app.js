@@ -401,11 +401,26 @@ async function dbSaveEvent(data) {
   const hasReminders = Array.isArray(data.reminders) && data.reminders.length > 0;
   if (data.id) {
     const { id, ...rest } = data;
-    await col.doc(id).set({ ...rest, hasReminders, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+    // Das volle .set() ersetzt das Dokument — Felder, die das Formular nicht kennt
+    // (Erstell-Vermerk, ausstehende Zuweisungs-Push), aus dem Bestand übernehmen.
+    const existing = state.events.find(e => e.id === id) || {};
+    const keep = {};
+    for (const k of PRESERVED_EVENT_FIELDS) {
+      if (existing[k] != null && rest[k] === undefined) keep[k] = existing[k];
+    }
+    await col.doc(id).set({ ...keep, ...rest, hasReminders, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
   } else {
-    await col.add({ ...data, hasReminders, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+    // data darf createdAt/createdBy überschreiben (Serien-Split erbt den Vermerk des Originals).
+    await col.add({
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+      createdBy: { memberId: getCurrentMemberId(), uid: state.uid || null },
+      ...data,
+      hasReminders,
+    });
   }
 }
+
+const PRESERVED_EVENT_FIELDS = ['createdAt', 'createdBy', 'assignNotifyPending', 'assignNotify'];
 
 async function dbDeleteEvent(id) {
   await db.collection('families').doc(state.familyId).collection('events').doc(id).delete();
@@ -621,6 +636,25 @@ function displayDescription(ev) { return isPrivateForOthers(ev) ? ''          : 
 function canEditEvent(ev) {
   if (!ev || !ev.privateMemberId) return true;
   return ev.privateMemberId === getCurrentMemberId();
+}
+
+// Termine (nicht Todos/Geburtstage) darf nur ändern/löschen, wer zugeordnet ist
+// („Alle" zählt für jeden) oder den Termin erstellt hat. Weil Nicht-Zugeordnete auch
+// nicht bearbeiten dürfen, kann sich niemand nachträglich selbst eintragen.
+function canModifyEvent(ev) {
+  if (!canEditEvent(ev)) return false;
+  if ((ev.type || 'termin') !== 'termin') return true;
+  const ids = ev.memberIds || [];
+  if (ids.length === 0 || ids.includes('all')) return true;
+  const me = getCurrentMemberId();
+  if (!me) return false;
+  return ids.includes(me) || ev.createdBy?.memberId === me;
+}
+
+function modifyDeniedMessage(ev, verb) {
+  return canEditEvent(ev)
+    ? `Diesen Termin können nur zugeordnete Personen ${verb}.`
+    : `Dieser Termin ist privat — nur der Ersteller kann ihn ${verb}.`;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -2333,6 +2367,10 @@ async function saveEvent() {
       showError('event-form-error', 'Fremde private Termine können nicht geändert werden.');
       return;
     }
+    if (existing && !canModifyEvent(existing)) {
+      showError('event-form-error', modifyDeniedMessage(existing, 'ändern'));
+      return;
+    }
     // Wenn Checkbox aus, aber bestehend privat: User entfernt die Privat-Markierung — OK.
   }
 
@@ -2419,8 +2457,9 @@ function openEventDetail(id, dateStr) {
 
   const bg = getEventBg(ev);
   const icon = ev.type === 'geburtstag' ? '🎁 ' : '';
-  // Idee 1: Edit/Delete-Buttons im Header ausblenden, wenn Termin fremd-privat ist
-  const editable = canEditEvent(ev);
+  // Edit/Delete-Buttons im Header ausblenden, wenn Termin fremd-privat ist (Idee 1)
+  // oder der User dem Termin nicht zugeordnet ist
+  const editable = canModifyEvent(ev);
   const editBtn  = document.querySelector('#sheet-event-detail .hdr-actions');
   if (editBtn) editBtn.style.visibility = editable ? '' : 'hidden';
 
@@ -2534,17 +2573,35 @@ function openEventDetail(id, dateStr) {
     </div>`;
   }
 
+  // Erstell-Vermerk + Hinweis auf fehlende Änderungsrechte, ganz unten
+  const createdLine = formatCreatedLine(ev);
+  const lockedLine = (!editable && canEditEvent(ev)) ? 'Nur zugeordnete Personen können diesen Termin ändern oder löschen.' : '';
+  if (createdLine || lockedLine) {
+    html += `<div class="detail-created">${[createdLine, lockedLine].filter(Boolean).join('<br>')}</div>`;
+  }
+
   html += '<div class="sheet-spacer"></div>';
   setHTML('event-detail-body', html);
   openSheet('sheet-event-detail');
+}
+
+// „Erstellt am 23.10.2026, 14:12 Uhr von Marco" — Altbestand hat oft keinen Ersteller
+// und (wenn je bearbeitet) auch kein createdAt mehr; dann nur das Vorhandene bzw. nichts.
+function formatCreatedLine(ev) {
+  const d = ev.createdAt?.toDate ? ev.createdAt.toDate() : null;
+  const name = getMember(ev.createdBy?.memberId)?.name || '';
+  const pad = n => String(n).padStart(2, '0');
+  const when = d ? `am ${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}, ${pad(d.getHours())}:${pad(d.getMinutes())} Uhr` : '';
+  if (!when && !name) return '';
+  return ['Erstellt', when, name ? `von ${name}` : ''].filter(Boolean).join(' ');
 }
 
 function editCurrentEvent() {
   if (!detailEventId) return;
   const ev = state.events.find(e => e.id === detailEventId);
   // Idee 1: defensiver Edit-Schutz für fremde private Termine
-  if (ev && !canEditEvent(ev)) {
-    alert('Dieser Termin ist privat — nur der Ersteller kann ihn ändern.');
+  if (ev && !canModifyEvent(ev)) {
+    alert(modifyDeniedMessage(ev, 'ändern'));
     return;
   }
   closeSheet('sheet-event-detail');
@@ -2556,8 +2613,8 @@ function deleteCurrentEvent() {
   const ev = state.events.find(e => e.id === detailEventId);
   if (!ev) return;
   // Idee 1: defensiver Delete-Schutz
-  if (!canEditEvent(ev)) {
-    alert('Dieser Termin ist privat — nur der Ersteller kann ihn löschen.');
+  if (!canModifyEvent(ev)) {
+    alert(modifyDeniedMessage(ev, 'löschen'));
     return;
   }
 
@@ -2590,6 +2647,14 @@ async function applyRecurringAction(scope) {
   const evId = state.editingEventData?.id || state.editingEventId;
   const ev = state.events.find(e => e.id === evId);
   if (!ev) return;
+  if (!canModifyEvent(ev)) {
+    alert(modifyDeniedMessage(ev, action === 'delete' ? 'löschen' : 'ändern'));
+    return;
+  }
+  // Abgespaltene Serienteile sind derselbe Termin → Erstell-Vermerk des Originals erben
+  const inherited = {};
+  if (ev.createdAt) inherited.createdAt = ev.createdAt;
+  if (ev.createdBy) inherited.createdBy = ev.createdBy;
 
   if (action === 'delete') {
     const instanceDate = state.editingEventData?.date;
@@ -2608,14 +2673,14 @@ async function applyRecurringAction(scope) {
       await commitWrite(dbSaveEvent(newData));
     } else if (scope === 'one') {
       await commitWrite(dbAddException(evId, newData.date));
-      const { id: _, ...rest } = newData;
+      const { id: _, ...rest } = { ...newData, ...inherited };
       rest.recurring = { type: 'none' };
       await commitWrite(dbSaveEvent(rest));
     } else {
       const endDate = fmt(addDays(parseDate(newData.date), -1));
       await commitWrite(db.collection('families').doc(state.familyId).collection('events').doc(evId)
         .update({ 'recurring.endDate': endDate }));
-      const { id: _, ...rest } = newData;
+      const { id: _, ...rest } = { ...newData, ...inherited };
       await commitWrite(dbSaveEvent(rest));
     }
   }
@@ -2921,6 +2986,164 @@ async function confirmIcalImport() {
 function cancelIcalImport() {
   state.icalPending = null;
   closeSheet('sheet-ical-import');
+}
+
+// ════════════════════════════════════════════════════════════════
+//  EXCEL-EXPORT (nur Termine)
+// ════════════════════════════════════════════════════════════════
+
+// SheetJS lazy-load (~250 KB, nur beim ersten Export)
+let _xlsxLibPromise = null;
+function loadXlsxLib() {
+  if (_xlsxLibPromise) return _xlsxLibPromise;
+  _xlsxLibPromise = new Promise((resolve, reject) => {
+    if (window.XLSX) return resolve(window.XLSX);
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js';
+    s.onload = () => resolve(window.XLSX);
+    s.onerror = () => { _xlsxLibPromise = null; reject(new Error('Excel-Bibliothek konnte nicht geladen werden')); };
+    document.head.appendChild(s);
+  });
+  return _xlsxLibPromise;
+}
+
+function initExportRange() {
+  const y = new Date().getFullYear();
+  const from = document.getElementById('export-from');
+  const to   = document.getElementById('export-to');
+  if (from && !from.value) from.value = `${y}-01-01`;
+  if (to && !to.value)     to.value   = `${y}-12-31`;
+}
+
+// Excel-Datumswert (Tage seit 30.12.1899) — ohne Zeitzonen-Umrechnung
+function excelDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000;
+}
+
+// Eine Zeile pro Vorkommen im Zeitraum: Serien werden aufgelöst,
+// mehrtägige Termine bleiben eine Zeile (von–bis). Fremd-private nur als „🔒 Privat".
+function buildExportRows(fromStr, toStr) {
+  const rangeStart = parseDate(fromStr);
+  const rangeEnd   = parseDate(toStr);
+  const rows = [];
+  for (const ev of state.events) {
+    if ((ev.type || 'termin') !== 'termin') continue;
+    const isSeries = ev.recurring && ev.recurring.type !== 'none';
+    let instances;
+    if (isSeries) {
+      instances = expandEvent(ev, rangeStart, rangeEnd).map(i => ({ date: i.date, endDate: i.date }));
+    } else {
+      const end = ev.endDate && ev.endDate > ev.date ? ev.endDate : ev.date;
+      instances = (ev.date <= toStr && end >= fromStr) ? [{ date: ev.date, endDate: end }] : [];
+    }
+    const ids = ev.memberIds || [];
+    const persons = (ids.length === 0 || ids[0] === 'all')
+      ? 'Alle'
+      : ids.map(id => getMember(id)?.name).filter(Boolean).join(', ');
+    for (const inst of instances) {
+      rows.push({
+        date: inst.date,
+        endDate: inst.endDate,
+        weekday: DE_WEEKDAYS[parseDate(inst.date).getDay()],
+        from: ev.startTime || 'ganztägig',
+        to: ev.startTime ? (ev.endTime || '') : '',
+        title: displayTitle(ev),
+        persons,
+        location: displayLocation(ev),
+        description: displayDescription(ev),
+        recurring: isSeries ? formatRecurringLabel(ev.recurring) : '',
+        private: ev.privateMemberId ? 'ja' : '',
+        sortTime: ev.startTime || '',
+      });
+    }
+  }
+  rows.sort((a, b) => a.date.localeCompare(b.date) || a.sortTime.localeCompare(b.sortTime) || a.title.localeCompare(b.title));
+  return rows;
+}
+
+let _pendingExportFile = null;
+
+async function exportTermine() {
+  const statusEl = document.getElementById('export-status');
+  const btn = document.getElementById('btn-export');
+  const setStatus = (html, isError) => {
+    if (!statusEl) return;
+    statusEl.innerHTML = html;
+    statusEl.style.color = isError ? 'var(--danger)' : '';
+    statusEl.classList.remove('hidden');
+  };
+  initExportRange();
+  const fromStr = document.getElementById('export-from').value;
+  const toStr   = document.getElementById('export-to').value;
+  if (fromStr > toStr) { setStatus('„Von" liegt nach „Bis".', true); return; }
+
+  if (btn) { btn.disabled = true; btn.textContent = 'Exportiert…'; }
+  try {
+    const XLSX = await loadXlsxLib();
+    const rows = buildExportRows(fromStr, toStr);
+    const header = ['Datum von', 'Datum bis', 'Wochentag', 'Uhrzeit von', 'Uhrzeit bis', 'Titel',
+                    'Personen', 'Ort', 'Beschreibung', 'Wiederholung', 'Privat'];
+    const aoa = [header, ...rows.map(r => [
+      excelDate(r.date), excelDate(r.endDate), r.weekday, r.from, r.to, r.title,
+      r.persons, r.location, r.description, r.recurring, r.private,
+    ])];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    for (let i = 1; i <= rows.length; i++) {
+      for (const c of [0, 1]) {
+        const cell = ws[XLSX.utils.encode_cell({ r: i, c })];
+        if (cell) cell.z = 'dd.mm.yyyy';
+      }
+    }
+    ws['!cols'] = [12, 12, 11, 11, 11, 32, 22, 22, 40, 22, 7].map(wch => ({ wch }));
+    ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: rows.length, c: header.length - 1 } }) };
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Termine');
+    const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+
+    const name = `Familienkalender_Termine_${fromStr.replace(/-/g, '')}-${toStr.replace(/-/g, '')}.xlsx`;
+    const file = new File([buf], name, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const label = `${rows.length} Termin${rows.length === 1 ? '' : 'e'}`;
+
+    if (isMobileDevice() && navigator.canShare && navigator.canShare({ files: [file] })) {
+      _pendingExportFile = file;
+      try {
+        await navigator.share({ files: [file], title: name });
+        setStatus(`✓ ${label} exportiert`);
+      } catch (e) {
+        if (e.name === 'AbortError') { setStatus(`${label} bereit — Teilen abgebrochen`); return; }
+        // iOS: Teilen nach dem Laden der Bibliothek ohne „frischen" Tap blockiert → zweiter Tap
+        setStatus(`${label} bereit. <button class="btn-text" onclick="App.sharePendingExport()">Datei teilen</button>`);
+      }
+      return;
+    }
+    downloadFile(file);
+    setStatus(`✓ ${label} exportiert`);
+  } catch (e) {
+    setStatus('Fehler: ' + e.message, true);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Als Excel exportieren (.xlsx)'; }
+  }
+}
+
+async function sharePendingExport() {
+  if (!_pendingExportFile) return;
+  try {
+    await navigator.share({ files: [_pendingExportFile], title: _pendingExportFile.name });
+  } catch (e) {
+    if (e.name !== 'AbortError') downloadFile(_pendingExportFile);
+  }
+}
+
+function downloadFile(file) {
+  const url = URL.createObjectURL(file);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = file.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -3903,6 +4126,8 @@ const App = {
   // Pt 9: iCal
   importICSFromInput,
   toggleIcalMember, toggleIcalAllMembers, confirmIcalImport, cancelIcalImport,
+  // Excel-Export
+  exportTermine, sharePendingExport,
   // Pt 19: member photo
   handleMemberPhotoInput, removeMemberPhoto,
   // Pt 26: PIN
@@ -3958,6 +4183,7 @@ const App = {
 
   setupOfflineBanner();
   setupSwipeNav();        // #7: Swipe Tag/Woche
+  initExportRange();      // Export-Zeitraum: aktuelles Jahr
 
   // Pt 18: apply saved theme immediately
   applyTheme();
