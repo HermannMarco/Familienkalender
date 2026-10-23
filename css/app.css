@@ -1270,6 +1270,23 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   border-radius: var(--radius-sm);
 }
 
+/* ── Excel-Export ───────────────────────────── */
+.export-range {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  margin-bottom: 10px;
+}
+.export-range .form-group { margin-bottom: 0; }
+
+/* ── Event detail: Erstell-Vermerk ──────────── */
+.detail-created {
+  margin-top: 18px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: .78rem;
+  color: var(--text-2);
+  line-height: 1.5;
+}
+
 /* ── Event detail color bar ─────────────────── */
 .detail-color-bar {
   height: 5px;
