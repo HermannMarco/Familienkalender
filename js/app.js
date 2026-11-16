@@ -2530,7 +2530,11 @@ function openEventDetail(id, dateStr) {
   if (locDisp) {
     html += `<div class="detail-meta-row">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-      ${locDisp}
+      <span class="detail-loc-text">${locDisp}</span>
+      <span class="detail-loc-actions">
+        <button type="button" class="detail-loc-btn" id="detail-loc-copy" onclick="App.copyDetailLocation()">Kopieren</button>
+        <button type="button" class="detail-loc-btn" onclick="App.openDetailLocationInMaps()">Karte</button>
+      </span>
     </div>`;
   }
 
@@ -3279,6 +3283,37 @@ async function copyFamilyUrl() {
     if (btn) { btn.textContent = 'Kopiert! ✓'; setTimeout(() => btn.textContent = 'URL kopieren', 2000); }
   } catch {
     alert('URL: ' + url);
+  }
+}
+
+// Ort aus Termin-Detail kopieren / in Navigation öffnen
+function getDetailLocation() {
+  const ev = state.events.find(e => e.id === detailEventId);
+  return ev ? displayLocation(ev).trim() : '';
+}
+
+async function copyDetailLocation() {
+  const loc = getDetailLocation();
+  if (!loc) return;
+  const btn = document.getElementById('detail-loc-copy');
+  try {
+    await navigator.clipboard.writeText(loc);
+    if (btn) { btn.textContent = 'Kopiert ✓'; setTimeout(() => btn.textContent = 'Kopieren', 2000); }
+  } catch {
+    prompt('Ort kopieren:', loc);
+  }
+}
+
+function openDetailLocationInMaps() {
+  const loc = getDetailLocation();
+  if (!loc) return;
+  const q = encodeURIComponent(loc);
+  // Android: geo:-Intent → Auswahl der installierten Navi-App (Google Maps, Waze, …)
+  // iPhone/PC: Google-Maps-Universal-Link (öffnet App falls installiert, sonst Browser)
+  if (/android/i.test(navigator.userAgent)) {
+    location.href = `geo:0,0?q=${q}`;
+  } else {
+    window.open(`https://www.google.com/maps/search/?api=1&query=${q}`, '_blank', 'noopener');
   }
 }
 
@@ -4114,6 +4149,7 @@ const App = {
   toggleTime, toggleRecurringOptions, toggleRecurringEnd,
   setEventType,
   openPairing, copyFamilyCode, copyFamilyUrl, confirmLeave,
+  copyDetailLocation, openDetailLocationInMaps,
   closeSheet, closeAllSheets,
   // Pt 11: search
   toggleSearch, onSearchInput,
