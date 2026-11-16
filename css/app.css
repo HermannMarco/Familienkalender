@@ -1032,6 +1032,14 @@ button { cursor: pointer; font-family: inherit; border: none; background: none; 
   color: var(--text-2); font-size: .9rem;
 }
 .detail-meta-row svg { width: 18px; height: 18px; flex-shrink: 0; }
+.detail-loc-text { flex: 1; min-width: 0; word-break: break-word; }
+.detail-loc-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.detail-loc-btn {
+  border: none; border-radius: 999px; padding: 6px 12px; min-height: 32px;
+  background: var(--primary-light); color: var(--primary);
+  font-size: .8rem; font-weight: 600; cursor: pointer;
+}
+.detail-loc-btn:active { transform: scale(.95); }
 .detail-members-section { margin-top: 10px; }
 .detail-members-label {
   font-size: .78rem; font-weight: 600; color: var(--text-2);
