@@ -646,6 +646,8 @@ function canModifyEvent(ev) {
   if ((ev.type || 'termin') !== 'termin') return true;
   const ids = ev.memberIds || [];
   if (ids.length === 0 || ids.includes('all')) return true;
+  // Kinder ohne eigenes Gerät: Termine mit mind. einem Kind darf jeder ändern/löschen.
+  if (ids.some(id => getMember(id)?.isChild)) return true;
   const me = getCurrentMemberId();
   if (!me) return false;
   return ids.includes(me) || ev.createdBy?.memberId === me;
@@ -1664,7 +1666,7 @@ function renderSettings() {
     setHTML('members-list', members.map(m => `
       <div class="member-row">
         ${getMemberAvatar(m,'md')}
-        <div class="member-name-text">${m.name}</div>
+        <div class="member-name-text">${m.name}${m.isChild ? ' <span class="member-child-badge">Kind</span>' : ''}</div>
         <button class="member-edit-btn" onclick="App.openEditMember('${m.id}')">Bearbeiten</button>
       </div>
     `).join(''));
@@ -1822,6 +1824,8 @@ function openAddMember() {
   selectedColor = MEMBER_COLORS[0];
   renderColorPicker();
   updateMemberPhotoPreview(null);
+  const childChk0 = document.getElementById('member-is-child');
+  if (childChk0) childChk0.checked = false;
   document.getElementById('member-lastseen-group')?.classList.add('hidden');
   hideError('member-form-error');
   openSheet('sheet-member');
@@ -1837,6 +1841,8 @@ function openEditMember(id) {
   selectedColor = m.color;
   renderColorPicker();
   updateMemberPhotoPreview(m.photo || null);
+  const childChk = document.getElementById('member-is-child');
+  if (childChk) childChk.checked = !!m.isChild;
   renderMemberLastSeen(id);
   hideError('member-form-error');
   openSheet('sheet-member');
@@ -1936,6 +1942,7 @@ function removeMemberPhoto() {
 async function saveMember() {
   const name = document.getElementById('member-name').value.trim();
   if (!name) { showError('member-form-error', 'Bitte Namen eingeben'); return; }
+  const isChild = !!document.getElementById('member-is-child')?.checked;
 
   const btn = document.getElementById('btn-save-member');
   if (btn) { btn.textContent = 'Speichert…'; btn.disabled = true; }
@@ -1945,7 +1952,7 @@ async function saveMember() {
     if (state.editingMemberId) {
       const idx = members.findIndex(m => m.id === state.editingMemberId);
       if (idx >= 0) {
-        members[idx] = { ...members[idx], name, color: selectedColor };
+        members[idx] = { ...members[idx], name, color: selectedColor, isChild };
         if (currentMemberPhoto !== null) {
           if (currentMemberPhoto === '') {
             delete members[idx].photo;
@@ -1956,7 +1963,7 @@ async function saveMember() {
       }
     } else {
       const memberId = genId();
-      const newMember = { id: memberId, name, color: selectedColor };
+      const newMember = { id: memberId, name, color: selectedColor, isChild };
       if (currentMemberPhoto?.startsWith('data:')) {
         newMember.photo = currentMemberPhoto;
       }
@@ -2190,7 +2197,10 @@ function updateEndDateVisibility() {
 
   if (recActive && !isBirthday && endInp && endInp.value) {
     const endTypeEl = document.getElementById('recurring-end-type');
-    if (endTypeEl && endTypeEl.value === 'never') {
+    // Nur echtes Enddatum (> Start) migrieren — ein bloß vorbelegtes (= Start) nicht,
+    // sonst endete die neue Serie sofort am ersten Tag.
+    const startVal = document.getElementById('event-date')?.value || '';
+    if (endTypeEl && endTypeEl.value === 'never' && endInp.value > startVal) {
       endTypeEl.value = 'date';
       document.getElementById('recurring-end-date').value = endInp.value;
       toggleRecurringEnd();
@@ -4183,6 +4193,26 @@ const App = {
 // ════════════════════════════════════════════════════════════════
 //  INIT
 // ════════════════════════════════════════════════════════════════
+
+// Enddatum leer → beim Antippen Startdatum vorbelegen, damit der Picker dort öffnet
+// (sonst springt er auf heute). Ein Enddatum ≤ Startdatum verwirft saveEvent ohnehin.
+// Zusätzlich min = Startdatum; späteres Startdatum zieht ein zu frühes Enddatum mit.
+function setupEndDateDefault() {
+  const startEl = document.getElementById('event-date');
+  const endEl   = document.getElementById('event-end-date');
+  if (!startEl || !endEl) return;
+  const prefill = () => {
+    endEl.min = startEl.value || '';
+    if (!endEl.value && startEl.value) endEl.value = startEl.value;
+  };
+  endEl.addEventListener('pointerdown', prefill);
+  endEl.addEventListener('focus', prefill);
+  startEl.addEventListener('change', () => {
+    endEl.min = startEl.value || '';
+    if (endEl.value && startEl.value && endEl.value < startEl.value) endEl.value = startEl.value;
+  });
+}
+setupEndDateDefault();
 
 (async function init() {
   const ok = await initFirebase();
