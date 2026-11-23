@@ -1635,3 +1635,10 @@ body:not(.ls-nav-collapsed) .ls-nav-toggle svg { transform: rotate(180deg); }
   margin-top: 2px;
 }
 #reminders-add-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* v43: Kind-Badge in Mitgliederliste */
+.member-child-badge {
+  display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+  font-size: .72rem; font-weight: 600; vertical-align: middle;
+  background: var(--primary-light); color: var(--primary);
+}
